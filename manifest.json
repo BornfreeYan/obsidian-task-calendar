@@ -1,0 +1,11 @@
+{
+	"id": "task-calendar",
+	"name": "Task Calendar",
+	"version": "1.1.0",
+	"minAppVersion": "0.15.0",
+  "description": "A task-based calendar with month and week views. Supports multi-day tasks using Obsidian Task syntax (🛫 start, 📅 due, #tags). Resize handles on task bars to adjust date ranges.",
+	"author": "Fullsail",
+	"authorUrl": "",
+	"fundingUrl": "",
+	"isDesktopOnly": false
+}
