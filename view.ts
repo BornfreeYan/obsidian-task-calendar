@@ -187,8 +187,6 @@ export class TaskCalendarView extends ItemView {
     switch (filter.property) {
       case "tags":
         return task.tags.some((t) => t.toLowerCase().includes(keyword));
-      case "priority":
-        return task.priority.toLowerCase().includes(keyword);
       case "description":
         return task.description.toLowerCase().includes(keyword);
     }
@@ -226,17 +224,15 @@ export class TaskCalendarView extends ItemView {
     switch (rule.property) {
       case "tags":
         return task.tags.some((t) => t.toLowerCase() === keyword);
-      case "priority":
-        return task.priority.toLowerCase() === keyword;
       case "description":
         return task.description.toLowerCase().includes(keyword);
     }
     return false;
   }
 
-  // ── Sort priority ──────────────────────────────────────
+  // ── Sort by color rule order ───────────────────────────
 
-  private getTaskSortPriority(task: Task): number {
+  private getTaskColorRuleIndex(task: Task): number {
     const rules = this.getEnabledColorRules();
     for (let i = 0; i < rules.length; i++) {
       if (this.taskMatchesColorRule(task, rules[i])) return i;
@@ -253,8 +249,8 @@ export class TaskCalendarView extends ItemView {
     // Sort tasks within each date
     for (const [dateStr, tasks] of byDate) {
       tasks.sort((a, b) => {
-        const pa = this.getTaskSortPriority(a);
-        const pb = this.getTaskSortPriority(b);
+        const pa = this.getTaskColorRuleIndex(a);
+        const pb = this.getTaskColorRuleIndex(b);
         if (pa !== pb) return pa - pb;
         return a.description.localeCompare(b.description);
       });

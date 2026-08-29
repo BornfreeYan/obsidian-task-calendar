@@ -1,8 +1,6 @@
 import { App, TFile } from "obsidian";
 import { addDays, formatDateStr, isValidDateStr, parseLocalDate } from "./dateUtils";
 
-export type TaskPriority = "none" | "low" | "medium" | "high";
-
 export interface Task {
   id: string;
   description: string;
@@ -11,7 +9,6 @@ export interface Task {
   lineNumber: number;
   startDate?: string; // 🛫
   dueDate?: string;   // 📅
-  priority: TaskPriority;
   tags: string[];
   rawText: string;
 }
@@ -102,13 +99,10 @@ export function parseTaskLine(
   const finalStart = startDate || dueDate;
   const finalDue = dueDate || startDate;
 
-  // Extract priority
-  const priority = extractPriority(rest);
-
   // Extract tags
   const tags = extractTags(rest);
 
-  // Clean description: remove date markers, priority, tags for display text
+  // Clean description: remove date markers and tags for display text
   let description = cleanDescription(rest);
 
   return {
@@ -119,7 +113,6 @@ export function parseTaskLine(
     lineNumber,
     startDate: finalStart,
     dueDate: finalDue,
-    priority,
     tags,
     rawText: line,
   };
@@ -141,15 +134,6 @@ function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function extractPriority(text: string): TaskPriority {
-  const match = text.match(/❗{1,3}/);
-  if (!match) return "none";
-  const count = match[0].length;
-  if (count >= 3) return "high";
-  if (count === 2) return "medium";
-  return "low";
-}
-
 function extractTags(text: string): string[] {
   const tags: string[] = [];
   // Obsidian tag format: #tag or #multi-word-tag
@@ -168,8 +152,6 @@ function cleanDescription(text: string): string {
   desc = desc.replace(/📅\s*\d{4}-\d{2}-\d{2}/g, "");
   desc = desc.replace(/⏳\s*\d{4}-\d{2}-\d{2}/g, "");
   desc = desc.replace(/✅\s*\d{4}-\d{2}-\d{2}/g, "");
-  // Remove priority markers
-  desc = desc.replace(/❗{1,3}/g, "");
   // Remove tags
   desc = desc.replace(/#[\w-]+/g, "");
   // Clean up extra spaces

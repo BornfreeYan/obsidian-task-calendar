@@ -6,7 +6,7 @@ export type ViewMode = "month" | "week";
 export interface ColorRule {
   id: string;
   color: string;
-  property: "tags" | "priority" | "description";
+  property: "tags" | "description";
   keyword: string;
   enabled: boolean;
   displayMode: DisplayMode;
@@ -14,7 +14,7 @@ export interface ColorRule {
 
 export interface FilterRule {
   id: string;
-  property: "tags" | "priority" | "description";
+  property: "tags" | "description";
   keyword: string;
   enabled: boolean;
 }

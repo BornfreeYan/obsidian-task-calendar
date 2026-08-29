@@ -44,7 +44,6 @@ const zh: Record<string, string> = {
   "query.empty": "暂无路径，默认扫描所有文件",
   "query.allFiles": "(所有文件)",
   "prop.tags": "标签",
-  "prop.priority": "优先级",
   "prop.description": "描述",
 };
 
@@ -68,14 +67,14 @@ const en: Record<string, string> = {
     "Could not update the task date. The task line may have been modified.",
   "filter.title": "Filter Rules",
   "filter.helper":
-    "Tags: enter the tag name (without #), e.g. work, math. Priority: enter high / medium / low / none. Description: enter a keyword that matches task text.",
+    "Tags: enter the tag name (without #), e.g. work, math. Description: enter a keyword that matches task text.",
   "filter.add": "+ Add Filter",
   "filter.empty": "No filter rules yet. Add one below.",
   "filter.contains": "contains",
   "filter.keywordPlaceholder": "Keyword",
   "color.title": "Color Rules",
   "color.helper":
-    "Tags: enter the tag name (without #), e.g. work, math. Priority: enter high / medium / low / none. Description: enter a keyword that matches task text.",
+    "Tags: enter the tag name (without #), e.g. work, math. Description: enter a keyword that matches task text.",
   "color.add": "+ Add Rule",
   "color.empty": "No rules yet. Add one below.",
   "color.modeBar": "Bar",
@@ -88,7 +87,6 @@ const en: Record<string, string> = {
   "query.empty": "No paths configured. Scanning all files.",
   "query.allFiles": "(All files)",
   "prop.tags": "Tags",
-  "prop.priority": "Priority",
   "prop.description": "Description",
 };
 

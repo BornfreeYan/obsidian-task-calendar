@@ -481,24 +481,6 @@
   flex-shrink: 0;
 }
 
-/* ── Priority ─────────────────────────────────────────────── */
-.task-priority {
-  font-size: 10px;
-  margin-left: 4px;
-}
-
-.task-priority-high {
-  color: #e6194b;
-}
-
-.task-priority-medium {
-  color: #f58231;
-}
-
-.task-priority-low {
-  color: #ffe119;
-}
-
 /* ── Tags ─────────────────────────────────────────────────── */
 .task-tags {
   display: flex;

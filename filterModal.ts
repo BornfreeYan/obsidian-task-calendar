@@ -5,7 +5,6 @@ import { createTranslator, Translator } from "./i18n";
 
 const PROPERTY_LABEL_KEYS: Record<FilterRule["property"], string> = {
   tags: "prop.tags",
-  priority: "prop.priority",
   description: "prop.description",
 };
 

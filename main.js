@@ -95,7 +95,6 @@ function parseTaskLine(line, filePath, lineNumber) {
     return null;
   const finalStart = startDate || dueDate;
   const finalDue = dueDate || startDate;
-  const priority = extractPriority(rest);
   const tags = extractTags(rest);
   let description = cleanDescription(rest);
   return {
@@ -106,7 +105,6 @@ function parseTaskLine(line, filePath, lineNumber) {
     lineNumber,
     startDate: finalStart,
     dueDate: finalDue,
-    priority,
     tags,
     rawText: line
   };
@@ -124,17 +122,6 @@ function extractDate(text, emoji) {
 function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
-function extractPriority(text) {
-  const match = text.match(/❗{1,3}/);
-  if (!match)
-    return "none";
-  const count = match[0].length;
-  if (count >= 3)
-    return "high";
-  if (count === 2)
-    return "medium";
-  return "low";
-}
 function extractTags(text) {
   const tags = [];
   const regex = /#([\w-]+)/g;
@@ -150,7 +137,6 @@ function cleanDescription(text) {
   desc = desc.replace(/📅\s*\d{4}-\d{2}-\d{2}/g, "");
   desc = desc.replace(/⏳\s*\d{4}-\d{2}-\d{2}/g, "");
   desc = desc.replace(/✅\s*\d{4}-\d{2}-\d{2}/g, "");
-  desc = desc.replace(/❗{1,3}/g, "");
   desc = desc.replace(/#[\w-]+/g, "");
   desc = desc.trim().replace(/\s+/g, " ");
   return desc;
@@ -293,7 +279,6 @@ var init_i18n = __esm({
       "query.empty": "\u6682\u65E0\u8DEF\u5F84\uFF0C\u9ED8\u8BA4\u626B\u63CF\u6240\u6709\u6587\u4EF6",
       "query.allFiles": "(\u6240\u6709\u6587\u4EF6)",
       "prop.tags": "\u6807\u7B7E",
-      "prop.priority": "\u4F18\u5148\u7EA7",
       "prop.description": "\u63CF\u8FF0"
     };
     en = {
@@ -314,13 +299,13 @@ var init_i18n = __esm({
       "common.done": "Done",
       "notice.updateFailed": "Could not update the task date. The task line may have been modified.",
       "filter.title": "Filter Rules",
-      "filter.helper": "Tags: enter the tag name (without #), e.g. work, math. Priority: enter high / medium / low / none. Description: enter a keyword that matches task text.",
+      "filter.helper": "Tags: enter the tag name (without #), e.g. work, math. Description: enter a keyword that matches task text.",
       "filter.add": "+ Add Filter",
       "filter.empty": "No filter rules yet. Add one below.",
       "filter.contains": "contains",
       "filter.keywordPlaceholder": "Keyword",
       "color.title": "Color Rules",
-      "color.helper": "Tags: enter the tag name (without #), e.g. work, math. Priority: enter high / medium / low / none. Description: enter a keyword that matches task text.",
+      "color.helper": "Tags: enter the tag name (without #), e.g. work, math. Description: enter a keyword that matches task text.",
       "color.add": "+ Add Rule",
       "color.empty": "No rules yet. Add one below.",
       "color.modeBar": "Bar",
@@ -332,7 +317,6 @@ var init_i18n = __esm({
       "query.empty": "No paths configured. Scanning all files.",
       "query.allFiles": "(All files)",
       "prop.tags": "Tags",
-      "prop.priority": "Priority",
       "prop.description": "Description"
     };
   }
@@ -387,7 +371,6 @@ var init_colorRulesModal = __esm({
     };
     PROPERTY_LABEL_KEYS = {
       tags: "prop.tags",
-      priority: "prop.priority",
       description: "prop.description"
     };
     ColorRulesModal = class extends import_obsidian2.Modal {
@@ -568,7 +551,6 @@ var init_filterModal = __esm({
     init_i18n();
     PROPERTY_LABEL_KEYS2 = {
       tags: "prop.tags",
-      priority: "prop.priority",
       description: "prop.description"
     };
     FilterModal = class extends import_obsidian3.Modal {
@@ -1123,12 +1105,6 @@ function createTaskCard(task, view, viewContext, weekRow) {
     }
   }
   card.createSpan({ cls: "calendar-note-text", text: task.description });
-  if (task.priority !== "none") {
-    card.createSpan({
-      cls: `task-priority task-priority-${task.priority}`,
-      text: getPriorityEmoji(task.priority)
-    });
-  }
   if (viewContext !== "month" && task.tags.length > 0) {
     const tagsEl = card.createDiv({ cls: "task-tags" });
     for (const tag of task.tags.slice(0, 3)) {
@@ -1152,18 +1128,6 @@ function createTaskCard(task, view, viewContext, weekRow) {
     setupBarResize(rightHit, task, "due", weekRow, view);
   }
   return card;
-}
-function getPriorityEmoji(priority) {
-  switch (priority) {
-    case "high":
-      return "\u2757\u2757\u2757";
-    case "medium":
-      return "\u2757\u2757";
-    case "low":
-      return "\u2757";
-    default:
-      return "";
-  }
 }
 function createDiv(opts) {
   const d = document.createElement("div");
@@ -1305,8 +1269,6 @@ function isTaskFiltered(view, task) {
     switch (f.property) {
       case "tags":
         return task.tags.some((t) => t.toLowerCase().includes(kw));
-      case "priority":
-        return task.priority.toLowerCase().includes(kw);
       case "description":
         return task.description.toLowerCase().includes(kw);
     }
@@ -1499,8 +1461,6 @@ var TaskCalendarView = class extends import_obsidian6.ItemView {
     switch (filter.property) {
       case "tags":
         return task.tags.some((t) => t.toLowerCase().includes(keyword));
-      case "priority":
-        return task.priority.toLowerCase().includes(keyword);
       case "description":
         return task.description.toLowerCase().includes(keyword);
     }
@@ -1534,15 +1494,13 @@ var TaskCalendarView = class extends import_obsidian6.ItemView {
     switch (rule.property) {
       case "tags":
         return task.tags.some((t) => t.toLowerCase() === keyword);
-      case "priority":
-        return task.priority.toLowerCase() === keyword;
       case "description":
         return task.description.toLowerCase().includes(keyword);
     }
     return false;
   }
-  // ── Sort priority ──────────────────────────────────────
-  getTaskSortPriority(task) {
+  // ── Sort by color rule order ───────────────────────────
+  getTaskColorRuleIndex(task) {
     const rules = this.getEnabledColorRules();
     for (let i = 0; i < rules.length; i++) {
       if (this.taskMatchesColorRule(task, rules[i]))
@@ -1556,8 +1514,8 @@ var TaskCalendarView = class extends import_obsidian6.ItemView {
     const byDate = groupTasksByDate(filtered);
     for (const [dateStr, tasks] of byDate) {
       tasks.sort((a, b) => {
-        const pa = this.getTaskSortPriority(a);
-        const pb = this.getTaskSortPriority(b);
+        const pa = this.getTaskColorRuleIndex(a);
+        const pb = this.getTaskColorRuleIndex(b);
         if (pa !== pb)
           return pa - pb;
         return a.description.localeCompare(b.description);
@@ -1656,6 +1614,12 @@ var TaskCalendarPlugin = class extends import_obsidian7.Plugin {
   }
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    this.settings.colorRules = this.settings.colorRules.filter(
+      (r) => r.property !== "priority"
+    );
+    this.settings.filterRules = this.settings.filterRules.filter(
+      (r) => r.property !== "priority"
+    );
   }
   async saveSettings() {
     await this.saveData(this.settings);

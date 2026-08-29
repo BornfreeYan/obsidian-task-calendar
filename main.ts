@@ -32,6 +32,13 @@ export default class TaskCalendarPlugin extends Plugin {
 
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    // Older versions stored rules with a priority property, which no longer exists.
+    this.settings.colorRules = this.settings.colorRules.filter(
+      (r) => (r.property as string) !== "priority"
+    );
+    this.settings.filterRules = this.settings.filterRules.filter(
+      (r) => (r.property as string) !== "priority"
+    );
   }
 
   async saveSettings() {

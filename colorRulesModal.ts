@@ -10,7 +10,6 @@ const DISPLAY_MODE_KEYS: Record<DisplayMode, string> = {
 
 const PROPERTY_LABEL_KEYS: Record<ColorRule["property"], string> = {
   tags: "prop.tags",
-  priority: "prop.priority",
   description: "prop.description",
 };
 

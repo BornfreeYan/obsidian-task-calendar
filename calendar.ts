@@ -435,13 +435,6 @@ function createTaskCard(
 
   card.createSpan({ cls: "calendar-note-text", text: task.description });
 
-  if (task.priority !== "none") {
-    card.createSpan({
-      cls: `task-priority task-priority-${task.priority}`,
-      text: getPriorityEmoji(task.priority),
-    });
-  }
-
   if (viewContext !== "month" && task.tags.length > 0) {
     const tagsEl = card.createDiv({ cls: "task-tags" });
     for (const tag of task.tags.slice(0, 3)) {
@@ -470,15 +463,6 @@ function createTaskCard(
   }
 
   return card;
-}
-
-function getPriorityEmoji(priority: string): string {
-  switch (priority) {
-    case "high": return "\u2757\u2757\u2757";
-    case "medium": return "\u2757\u2757";
-    case "low": return "\u2757";
-    default: return "";
-  }
 }
 
 function createDiv(opts: { cls: string }): HTMLDivElement {
@@ -669,8 +653,6 @@ function isTaskFiltered(view: TaskCalendarView, task: Task): boolean {
     switch (f.property) {
       case "tags":
         return task.tags.some((t) => t.toLowerCase().includes(kw));
-      case "priority":
-        return task.priority.toLowerCase().includes(kw);
       case "description":
         return task.description.toLowerCase().includes(kw);
     }
