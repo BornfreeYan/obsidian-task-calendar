@@ -5,13 +5,15 @@ import { ColorRulesModal } from "./colorRulesModal";
 import { FilterModal } from "./filterModal";
 import { QueryPathModal } from "./queryPathModal";
 import { Task, isMultiDayTask } from "./taskParser";
+import { addDays, formatDateStr, pad, parseLocalDate } from "./dateUtils";
+import { Translator } from "./i18n";
 
 export function renderCalendar(container: HTMLElement, view: TaskCalendarView) {
   renderToolbar(container, view);
   renderHeader(container, view);
 
   if (view.viewMode === "month") {
-    renderWeekdayHeaders(container);
+    renderWeekdayHeaders(container, view);
   }
 
   switch (view.viewMode) {
@@ -33,8 +35,8 @@ function renderToolbar(container: HTMLElement, view: TaskCalendarView) {
 
   const modeGroup = toolbar.createDiv({ cls: "calendar-mode-group" });
   const modes: { key: ViewMode; label: string }[] = [
-    { key: "month", label: "\u6708" },
-    { key: "week", label: "\u5468" },
+    { key: "month", label: view.t("mode.month") },
+    { key: "week", label: view.t("mode.week") },
   ];
   for (const m of modes) {
     const btn = modeGroup.createEl("button", {
@@ -49,7 +51,7 @@ function renderToolbar(container: HTMLElement, view: TaskCalendarView) {
 
   const queryBtn = toolbar.createEl("button", {
     cls: "calendar-query-btn",
-    text: "\u626b\u63cf\u8def\u5f84",
+    text: view.t("toolbar.scanPaths"),
   });
   queryBtn.addEventListener("click", () => {
     const modal = new QueryPathModal(view.app, view.plugin, () => {
@@ -60,7 +62,7 @@ function renderToolbar(container: HTMLElement, view: TaskCalendarView) {
 
   const colorBtn = toolbar.createEl("button", {
     cls: "calendar-color-rules-btn",
-    text: "\u5206\u7c7b\u914d\u8272",
+    text: view.t("toolbar.colorRules"),
   });
   colorBtn.addEventListener("click", () => {
     const modal = new ColorRulesModal(view.app, view.plugin);
@@ -70,7 +72,7 @@ function renderToolbar(container: HTMLElement, view: TaskCalendarView) {
 
   const filterBtn = toolbar.createEl("button", {
     cls: `calendar-filter-btn${view.hasActiveFilters ? " has-filters" : ""}`,
-    text: "\u7b5b\u9009",
+    text: view.t("toolbar.filter"),
   });
   filterBtn.addEventListener("click", () => {
     const modal = new FilterModal(view.app, view.plugin);
@@ -101,7 +103,7 @@ function renderHeader(container: HTMLElement, view: TaskCalendarView) {
     view.render();
   });
 
-  const todayBtn = header.createEl("button", { cls: "calendar-today-btn", text: "\u4eca\u5929" });
+  const todayBtn = header.createEl("button", { cls: "calendar-today-btn", text: view.t("header.today") });
   todayBtn.addEventListener("click", () => {
     view.currentDate = new Date();
     view.render();
@@ -122,27 +124,34 @@ function navigate(view: TaskCalendarView, direction: number) {
 function headerTitle(view: TaskCalendarView): string {
   const y = view.currentDate.getFullYear();
   const m = view.currentDate.getMonth();
-  switch (view.viewMode) {
-    case "month":
-      return `${y}\u5e74${m + 1}\u6708`;
-    case "week": {
-      const mon = getWeekMonday(view.currentDate);
-      const sun = new Date(mon);
-      sun.setDate(sun.getDate() + 6);
-      const fmt = (dt: Date) => `${dt.getMonth() + 1}/${dt.getDate()}`;
-      return `${y}\u5e74  ${fmt(mon)} \u2013 ${fmt(sun)}`;
-    }
+  if (view.viewMode === "month") {
+    return view.t.language === "zh" ? `${y}\u5e74${m + 1}\u6708` : `${m + 1}/${y}`;
   }
-  return "";
+
+  const mon = getWeekMonday(view.currentDate);
+  const sun = new Date(mon);
+  sun.setDate(sun.getDate() + 6);
+  const fmt = (dt: Date) => `${dt.getMonth() + 1}/${dt.getDate()}`;
+  if (view.t.language === "zh") {
+    return `${y}\u5e74 ${fmt(mon)} \u2013 ${fmt(sun)}`;
+  }
+  return `${fmt(mon)} \u2013 ${fmt(sun)}, ${y}`;
 }
 
 // ═══════════════════════════════════════════════════════════
 //  Weekday Headers (Month view only)
 // ═══════════════════════════════════════════════════════════
 
-function renderWeekdayHeaders(container: HTMLElement) {
+function weekdayNames(t: Translator): string[] {
+  if (t.language === "zh") {
+    return ["\u4e00", "\u4e8c", "\u4e09", "\u56db", "\u4e94", "\u516d", "\u65e5"];
+  }
+  return ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+}
+
+function renderWeekdayHeaders(container: HTMLElement, view: TaskCalendarView) {
   const row = container.createDiv({ cls: "calendar-weekdays" });
-  for (const d of ["\u4e00", "\u4e8c", "\u4e09", "\u56db", "\u4e94", "\u516d", "\u65e5"]) {
+  for (const d of weekdayNames(view.t)) {
     row.createDiv({ cls: "calendar-weekday", text: d });
   }
 }
@@ -327,11 +336,11 @@ function renderMonthView(container: HTMLElement, view: TaskCalendarView) {
 
         // Resize hit areas
         const leftHit = bar.createDiv({ cls: "month-bar-hit-left" });
-        leftHit.setAttr("title", "\u8c03\u6574\u8d77\u59cb\u65e5\u671f");
+        leftHit.setAttr("title", view.t("axis.adjustStart"));
         setupBarResize(leftHit, task, "start", weekRow, view);
 
         const rightHit = bar.createDiv({ cls: "month-bar-hit-right" });
-        rightHit.setAttr("title", "\u8c03\u6574\u7ec8\u6b62\u65e5\u671f");
+        rightHit.setAttr("title", view.t("axis.adjustDue"));
         setupBarResize(rightHit, task, "due", weekRow, view);
       }
     }
@@ -369,7 +378,7 @@ function renderWeekView(container: HTMLElement, view: TaskCalendarView) {
   const mon = getWeekMonday(view.currentDate);
   const grid = container.createDiv({ cls: "calendar-week-grid" });
   const todayStr = formatDateStr(new Date());
-  const dayNames = ["\u4e00", "\u4e8c", "\u4e09", "\u56db", "\u4e94", "\u516d", "\u65e5"];
+  const dayNames = weekdayNames(view.t);
 
   for (let i = 0; i < 7; i++) {
     const d = new Date(mon);
@@ -452,11 +461,11 @@ function createTaskCard(
   // Month-view cards also get resize handles
   if (viewContext === "month" && weekRow) {
     const leftHit = card.createDiv({ cls: "card-hit-left" });
-    leftHit.setAttr("title", "\u8c03\u6574\u8d77\u59cb\u65e5\u671f");
+    leftHit.setAttr("title", view.t("axis.adjustStart"));
     setupBarResize(leftHit, task, "start", weekRow, view);
 
     const rightHit = card.createDiv({ cls: "card-hit-right" });
-    rightHit.setAttr("title", "\u8c03\u6574\u7ec8\u6b62\u65e5\u671f");
+    rightHit.setAttr("title", view.t("axis.adjustDue"));
     setupBarResize(rightHit, task, "due", weekRow, view);
   }
 
@@ -570,7 +579,7 @@ function setupContextMenu(el: HTMLElement, view: TaskCalendarView, dateStr: stri
     const menu = new Menu();
     menu.addItem((item) => {
       item
-        .setTitle("\u65b0\u5efa\u4efb\u52a1")
+        .setTitle(view.t("ctx.newTask"))
         .setIcon("file-plus")
         .onClick(() => showCreateTaskModal(view.app, view, dateStr));
     });
@@ -584,21 +593,24 @@ function setupContextMenu(el: HTMLElement, view: TaskCalendarView, dateStr: stri
 
 function showCreateTaskModal(app: App, view: TaskCalendarView, dateStr: string) {
   const modalEl = document.body.createDiv({ cls: "calendar-create-modal" });
-  modalEl.createEl("div", { cls: "calendar-create-title", text: `\u65b0\u5efa\u4efb\u52a1 \u2014 ${dateStr}` });
+  modalEl.createEl("div", {
+    cls: "calendar-create-title",
+    text: `${view.t("create.title")} \u2014 ${dateStr}`,
+  });
 
   const input = modalEl.createEl("input", {
     cls: "calendar-create-input",
     type: "text",
-    attr: { placeholder: "\u4efb\u52a1\u63cf\u8ff0" },
+    attr: { placeholder: view.t("create.placeholder") },
   });
   input.focus();
 
   const footer = modalEl.createDiv({ cls: "calendar-create-footer" });
 
-  const cancelBtn = footer.createEl("button", { text: "\u53d6\u6d88" });
+  const cancelBtn = footer.createEl("button", { text: view.t("common.cancel") });
   cancelBtn.addEventListener("click", () => modalEl.remove());
 
-  const okBtn = footer.createEl("button", { cls: "mod-cta", text: "\u521b\u5efa" });
+  const okBtn = footer.createEl("button", { cls: "mod-cta", text: view.t("common.create") });
   okBtn.addEventListener("click", async () => {
     const title = input.value.trim();
     if (!title) return;
@@ -634,7 +646,13 @@ async function createTaskForDate(app: App, view: TaskCalendarView, dateStr: stri
     await app.vault.modify(file, newContent);
   }
 
-  await view.loadTasks();
+  // Refresh only the file we just touched, not the whole vault.
+  const target = app.vault.getAbstractFileByPath(fullPath);
+  if (target instanceof TFile) {
+    await view.loadTasks({ files: [target] });
+  } else {
+    await view.loadTasks();
+  }
   view.render();
 }
 
@@ -670,23 +688,9 @@ function rangesOverlap(a: Task, b: Task): boolean {
 
 function daySpan(task: Task): number {
   if (!task.startDate || !task.dueDate) return 1;
-  const s = new Date(task.startDate);
-  const e = new Date(task.dueDate);
+  const s = parseLocalDate(task.startDate);
+  const e = parseLocalDate(task.dueDate);
   return Math.round((e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-}
-
-function addDays(dateStr: string, days: number): string {
-  const d = new Date(dateStr);
-  d.setDate(d.getDate() + days);
-  return formatDateStr(d);
-}
-
-function formatDateStr(d: Date): string {
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
-function pad(n: number): string {
-  return String(n).padStart(2, "0");
 }
 
 function getWeekMonday(date: Date): Date {

@@ -1,4 +1,5 @@
 import { App, TFile } from "obsidian";
+import { addDays, formatDateStr, isValidDateStr, parseLocalDate } from "./dateUtils";
 
 export type TaskPriority = "none" | "low" | "medium" | "high";
 
@@ -27,45 +28,52 @@ export async function getAllTasks(
 
   for (const file of files) {
     const content = await app.vault.read(file);
-    const lines = content.split("\n");
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const parsed = parseTaskLine(line, file.path, i);
-      if (parsed) {
-        tasks.push(parsed);
-      }
-    }
+    tasks.push(...parseFileTasks(content, file.path));
   }
 
   return tasks;
 }
 
-function getQueryFiles(
+/**
+ * Parse a single file's content into tasks. Used both by the full scan and
+ * by incremental updates when a file changes.
+ */
+export function parseFileTasks(content: string, filePath: string): Task[] {
+  const lines = content.split("\n");
+  const tasks: Task[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const parsed = parseTaskLine(lines[i], filePath, i);
+    if (parsed) {
+      tasks.push(parsed);
+    }
+  }
+  return tasks;
+}
+
+export function getQueryFiles(
   app: App,
   queryPaths: { path: string; enabled: boolean }[]
 ): TFile[] {
+  return app.vault
+    .getMarkdownFiles()
+    .filter((f) => isFileInQueryPaths(f.path, queryPaths));
+}
+
+export function isFileInQueryPaths(
+  filePath: string,
+  queryPaths: { path: string; enabled: boolean }[]
+): boolean {
   const enabledPaths = queryPaths.filter((p) => p.enabled).map((p) => p.path);
-  if (enabledPaths.length === 0) return app.vault.getMarkdownFiles();
+  if (enabledPaths.length === 0) return true;
 
-  const allFiles = app.vault.getMarkdownFiles();
-  const result: TFile[] = [];
-
-  for (const file of allFiles) {
-    for (const qp of enabledPaths) {
-      if (qp === "") {
-        result.push(file);
-        break;
-      }
-      const prefix = qp.endsWith("/") ? qp : qp + "/";
-      if (file.path === qp || file.path.startsWith(prefix)) {
-        result.push(file);
-        break;
-      }
+  for (const qp of enabledPaths) {
+    if (qp === "") return true;
+    const prefix = qp.endsWith("/") ? qp : qp + "/";
+    if (filePath === qp || filePath.startsWith(prefix)) {
+      return true;
     }
   }
-
-  return result;
+  return false;
 }
 
 /**
@@ -123,13 +131,8 @@ function extractDate(text: string, emoji: string): string | undefined {
     `${escapeRegex(emoji)}\\s*(\\d{4}-\\d{2}-\\d{2})`
   );
   const match = text.match(regex);
-  if (match) {
-    const dateStr = match[1];
-    // Validate date
-    const d = new Date(dateStr);
-    if (!isNaN(d.getTime())) {
-      return dateStr;
-    }
+  if (match && isValidDateStr(match[1])) {
+    return match[1];
   }
   return undefined;
 }
@@ -203,8 +206,8 @@ export function groupTasksByDate(tasks: Task[]): Map<string, Task[]> {
  */
 function getDateRange(start: string, end: string): string[] {
   const result: string[] = [];
-  const s = new Date(start);
-  const e = new Date(end);
+  const s = parseLocalDate(start);
+  const e = parseLocalDate(end);
 
   // Ensure s <= e
   if (s > e) {
@@ -218,13 +221,6 @@ function getDateRange(start: string, end: string): string[] {
   }
 
   return result;
-}
-
-function formatDateStr(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
 }
 
 /**
@@ -247,22 +243,28 @@ export function isMultiDayTask(task: Task): boolean {
 
 /**
  * Update task dates in the original file.
+ *
+ * The line number captured at parse time can drift if the user edits the
+ * file afterwards; when the expected line no longer matches the task's raw
+ * text, fall back to searching the whole file. Returns false if the task
+ * line can no longer be found, so the caller can notify the user.
  */
 export async function updateTaskDates(
   app: App,
   task: Task,
   newStartDate: string,
   newDueDate: string
-): Promise<void> {
+): Promise<boolean> {
   const file = app.vault.getAbstractFileByPath(task.filePath);
-  if (!(file instanceof TFile)) return;
+  if (!(file instanceof TFile)) return false;
 
   const content = await app.vault.read(file);
   const lines = content.split("\n");
 
-  if (task.lineNumber < 0 || task.lineNumber >= lines.length) return;
+  const lineIndex = findTaskLine(lines, task);
+  if (lineIndex === -1) return false;
 
-  let line = lines[task.lineNumber];
+  let line = lines[lineIndex];
 
   // Replace or add start date (🛫)
   if (line.includes("🛫")) {
@@ -278,8 +280,20 @@ export async function updateTaskDates(
     line += ` 📅 ${newDueDate}`;
   }
 
-  lines[task.lineNumber] = line;
+  lines[lineIndex] = line;
   await app.vault.modify(file, lines.join("\n"));
+  return true;
+}
+
+function findTaskLine(lines: string[], task: Task): number {
+  if (
+    task.lineNumber >= 0 &&
+    task.lineNumber < lines.length &&
+    lines[task.lineNumber] === task.rawText
+  ) {
+    return task.lineNumber;
+  }
+  return lines.findIndex((l) => l === task.rawText);
 }
 
 /**
@@ -292,10 +306,4 @@ export function shiftTaskDates(
   const newStart = addDays(task.startDate || "", days);
   const newDue = addDays(task.dueDate || task.startDate || "", days);
   return { startDate: newStart, dueDate: newDue };
-}
-
-function addDays(dateStr: string, days: number): string {
-  const d = new Date(dateStr);
-  d.setDate(d.getDate() + days);
-  return formatDateStr(d);
 }

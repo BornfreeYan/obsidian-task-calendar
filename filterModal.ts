@@ -1,21 +1,24 @@
 import { App, Modal } from "obsidian";
 import TaskCalendarPlugin from "./main";
 import { FilterRule } from "./settings";
+import { createTranslator, Translator } from "./i18n";
 
-const PROPERTY_LABELS: Record<FilterRule["property"], string> = {
-  tags: "标签",
-  priority: "优先级",
-  description: "描述",
+const PROPERTY_LABEL_KEYS: Record<FilterRule["property"], string> = {
+  tags: "prop.tags",
+  priority: "prop.priority",
+  description: "prop.description",
 };
 
 export class FilterModal extends Modal {
   plugin: TaskCalendarPlugin;
   private rules: FilterRule[];
   private contentArea: HTMLDivElement;
+  private t: Translator;
 
   constructor(app: App, plugin: TaskCalendarPlugin) {
     super(app);
     this.plugin = plugin;
+    this.t = createTranslator(app);
     this.rules = plugin.settings.filterRules.map((r) => ({ ...r }));
   }
 
@@ -24,10 +27,10 @@ export class FilterModal extends Modal {
     contentEl.empty();
     contentEl.addClass("filter-modal");
 
-    contentEl.createEl("h3", { text: "筛选排除" });
+    contentEl.createEl("h3", { text: this.t("filter.title") });
     contentEl.createEl("div", {
       cls: "modal-helper-text",
-      text: "标签：填写标签名（不含#），如 工作、数学。优先级：填写 high / medium / low / none。描述：填写关键词匹配任务文本。",
+      text: this.t("filter.helper"),
     });
 
     this.contentArea = contentEl.createDiv({ cls: "filter-rules-list" });
@@ -35,18 +38,18 @@ export class FilterModal extends Modal {
 
     const addBtn = contentEl.createEl("button", {
       cls: "filter-add-btn",
-      text: "+ 新增筛选",
+      text: this.t("filter.add"),
     });
     addBtn.addEventListener("click", () => this.addRule());
 
     const footer = contentEl.createDiv({ cls: "filter-footer" });
 
-    const cancelBtn = footer.createEl("button", { text: "取消" });
+    const cancelBtn = footer.createEl("button", { text: this.t("common.cancel") });
     cancelBtn.addEventListener("click", () => this.close());
 
     const saveBtn = footer.createEl("button", {
       cls: "mod-cta",
-      text: "完成",
+      text: this.t("common.done"),
     });
     saveBtn.addEventListener("click", () => {
       this.plugin.settings.filterRules = this.rules.filter(
@@ -68,7 +71,7 @@ export class FilterModal extends Modal {
     if (this.rules.length === 0) {
       this.contentArea.createDiv({
         cls: "filter-rules-empty",
-        text: "暂无筛选规则，点击下方按钮新增",
+        text: this.t("filter.empty"),
       });
       return;
     }
@@ -80,21 +83,21 @@ export class FilterModal extends Modal {
       // Property selector
       const selectWrapper = row.createDiv({ cls: "filter-select-wrap" });
       const select = selectWrapper.createEl("select", { cls: "filter-select" });
-      for (const [value, label] of Object.entries(PROPERTY_LABELS)) {
-        select.createEl("option", { text: label, value });
+      for (const [value, key] of Object.entries(PROPERTY_LABEL_KEYS)) {
+        select.createEl("option", { text: this.t(key), value });
       }
       select.value = rule.property;
       select.addEventListener("change", () => {
         rule.property = select.value as FilterRule["property"];
       });
 
-      row.createSpan({ cls: "filter-contains", text: "包含" });
+      row.createSpan({ cls: "filter-contains", text: this.t("filter.contains") });
 
       const keywordInput = row.createEl("input", {
         cls: "filter-keyword",
         type: "text",
         value: rule.keyword,
-        attr: { placeholder: "关键词" },
+        attr: { placeholder: this.t("filter.keywordPlaceholder") },
       });
       keywordInput.addEventListener("input", () => {
         rule.keyword = keywordInput.value;

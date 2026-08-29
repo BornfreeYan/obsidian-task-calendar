@@ -23,43 +23,65 @@ var __copyProps = (to, from, except, desc) => {
 };
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
+// dateUtils.ts
+function parseLocalDate(dateStr) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+function formatDateStr(d) {
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+function addDays(dateStr, days) {
+  const d = parseLocalDate(dateStr);
+  d.setDate(d.getDate() + days);
+  return formatDateStr(d);
+}
+function isValidDateStr(dateStr) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+  if (!m)
+    return false;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  const dt = new Date(y, mo - 1, d);
+  return dt.getFullYear() === y && dt.getMonth() === mo - 1 && dt.getDate() === d;
+}
+function pad(n) {
+  return String(n).padStart(2, "0");
+}
+var init_dateUtils = __esm({
+  "dateUtils.ts"() {
+  }
+});
+
 // taskParser.ts
-async function getAllTasks(app, queryPaths) {
-  const files = getQueryFiles(app, queryPaths);
+function parseFileTasks(content, filePath) {
+  const lines = content.split("\n");
   const tasks = [];
-  for (const file of files) {
-    const content = await app.vault.read(file);
-    const lines = content.split("\n");
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const parsed = parseTaskLine(line, file.path, i);
-      if (parsed) {
-        tasks.push(parsed);
-      }
+  for (let i = 0; i < lines.length; i++) {
+    const parsed = parseTaskLine(lines[i], filePath, i);
+    if (parsed) {
+      tasks.push(parsed);
     }
   }
   return tasks;
 }
 function getQueryFiles(app, queryPaths) {
+  return app.vault.getMarkdownFiles().filter((f) => isFileInQueryPaths(f.path, queryPaths));
+}
+function isFileInQueryPaths(filePath, queryPaths) {
   const enabledPaths = queryPaths.filter((p) => p.enabled).map((p) => p.path);
   if (enabledPaths.length === 0)
-    return app.vault.getMarkdownFiles();
-  const allFiles = app.vault.getMarkdownFiles();
-  const result = [];
-  for (const file of allFiles) {
-    for (const qp of enabledPaths) {
-      if (qp === "") {
-        result.push(file);
-        break;
-      }
-      const prefix = qp.endsWith("/") ? qp : qp + "/";
-      if (file.path === qp || file.path.startsWith(prefix)) {
-        result.push(file);
-        break;
-      }
+    return true;
+  for (const qp of enabledPaths) {
+    if (qp === "")
+      return true;
+    const prefix = qp.endsWith("/") ? qp : qp + "/";
+    if (filePath === qp || filePath.startsWith(prefix)) {
+      return true;
     }
   }
-  return result;
+  return false;
 }
 function parseTaskLine(line, filePath, lineNumber) {
   const taskMatch = line.match(/^\s*-\s*\[([ xX])\]\s+(.*)$/);
@@ -94,12 +116,8 @@ function extractDate(text, emoji) {
     `${escapeRegex(emoji)}\\s*(\\d{4}-\\d{2}-\\d{2})`
   );
   const match = text.match(regex);
-  if (match) {
-    const dateStr = match[1];
-    const d = new Date(dateStr);
-    if (!isNaN(d.getTime())) {
-      return dateStr;
-    }
+  if (match && isValidDateStr(match[1])) {
+    return match[1];
   }
   return void 0;
 }
@@ -156,8 +174,8 @@ function groupTasksByDate(tasks) {
 }
 function getDateRange(start, end) {
   const result = [];
-  const s = new Date(start);
-  const e = new Date(end);
+  const s = parseLocalDate(start);
+  const e = parseLocalDate(end);
   if (s > e) {
     return [start];
   }
@@ -168,12 +186,6 @@ function getDateRange(start, end) {
   }
   return result;
 }
-function formatDateStr(d) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
 function isMultiDayTask(task) {
   if (!task.startDate || !task.dueDate)
     return false;
@@ -182,12 +194,13 @@ function isMultiDayTask(task) {
 async function updateTaskDates(app, task, newStartDate, newDueDate) {
   const file = app.vault.getAbstractFileByPath(task.filePath);
   if (!(file instanceof import_obsidian.TFile))
-    return;
+    return false;
   const content = await app.vault.read(file);
   const lines = content.split("\n");
-  if (task.lineNumber < 0 || task.lineNumber >= lines.length)
-    return;
-  let line = lines[task.lineNumber];
+  const lineIndex = findTaskLine(lines, task);
+  if (lineIndex === -1)
+    return false;
+  let line = lines[lineIndex];
   if (line.includes("\u{1F6EB}")) {
     line = line.replace(/🛫\s*\d{4}-\d{2}-\d{2}/, `\u{1F6EB} ${newStartDate}`);
   } else {
@@ -198,23 +211,130 @@ async function updateTaskDates(app, task, newStartDate, newDueDate) {
   } else {
     line += ` \u{1F4C5} ${newDueDate}`;
   }
-  lines[task.lineNumber] = line;
+  lines[lineIndex] = line;
   await app.vault.modify(file, lines.join("\n"));
+  return true;
+}
+function findTaskLine(lines, task) {
+  if (task.lineNumber >= 0 && task.lineNumber < lines.length && lines[task.lineNumber] === task.rawText) {
+    return task.lineNumber;
+  }
+  return lines.findIndex((l) => l === task.rawText);
 }
 function shiftTaskDates(task, days) {
   const newStart = addDays(task.startDate || "", days);
   const newDue = addDays(task.dueDate || task.startDate || "", days);
   return { startDate: newStart, dueDate: newDue };
 }
-function addDays(dateStr, days) {
-  const d = new Date(dateStr);
-  d.setDate(d.getDate() + days);
-  return formatDateStr(d);
-}
 var import_obsidian;
 var init_taskParser = __esm({
   "taskParser.ts"() {
     import_obsidian = require("obsidian");
+    init_dateUtils();
+  }
+});
+
+// i18n.ts
+function createTranslator(app) {
+  const language = detectLanguage(app);
+  const dict = language === "zh" ? zh : en;
+  const t = (key) => {
+    var _a;
+    return (_a = dict[key]) != null ? _a : key;
+  };
+  t.language = language;
+  return t;
+}
+function detectLanguage(app) {
+  var _a, _b, _c, _d, _e;
+  try {
+    const lang = (_e = (_d = (_a = app.i18n) == null ? void 0 : _a.language) != null ? _d : (_c = (_b = window.moment) == null ? void 0 : _b.locale) == null ? void 0 : _c.call(_b)) != null ? _e : "en";
+    return typeof lang === "string" && lang.toLowerCase().startsWith("zh") ? "zh" : "en";
+  } catch (e) {
+    return "en";
+  }
+}
+var zh, en;
+var init_i18n = __esm({
+  "i18n.ts"() {
+    zh = {
+      "mode.month": "\u6708",
+      "mode.week": "\u5468",
+      "toolbar.scanPaths": "\u626B\u63CF\u8DEF\u5F84",
+      "toolbar.colorRules": "\u5206\u7C7B\u914D\u8272",
+      "toolbar.filter": "\u7B5B\u9009",
+      "header.today": "\u4ECA\u5929",
+      "axis.adjustStart": "\u8C03\u6574\u8D77\u59CB\u65E5\u671F",
+      "axis.adjustDue": "\u8C03\u6574\u7EC8\u6B62\u65E5\u671F",
+      "ctx.newTask": "\u65B0\u5EFA\u4EFB\u52A1",
+      "create.title": "\u65B0\u5EFA\u4EFB\u52A1",
+      "create.placeholder": "\u4EFB\u52A1\u63CF\u8FF0",
+      "common.cancel": "\u53D6\u6D88",
+      "common.create": "\u521B\u5EFA",
+      "common.save": "\u4FDD\u5B58",
+      "common.done": "\u5B8C\u6210",
+      "notice.updateFailed": "\u4EFB\u52A1\u65E5\u671F\u66F4\u65B0\u5931\u8D25\uFF0C\u4EFB\u52A1\u884C\u53EF\u80FD\u5DF2\u88AB\u4FEE\u6539",
+      "filter.title": "\u7B5B\u9009\u6392\u9664",
+      "filter.helper": "\u6807\u7B7E\uFF1A\u586B\u5199\u6807\u7B7E\u540D\uFF08\u4E0D\u542B#\uFF09\uFF0C\u5982 \u5DE5\u4F5C\u3001\u6570\u5B66\u3002\u4F18\u5148\u7EA7\uFF1A\u586B\u5199 high / medium / low / none\u3002\u63CF\u8FF0\uFF1A\u586B\u5199\u5173\u952E\u8BCD\u5339\u914D\u4EFB\u52A1\u6587\u672C\u3002",
+      "filter.add": "+ \u65B0\u589E\u7B5B\u9009",
+      "filter.empty": "\u6682\u65E0\u7B5B\u9009\u89C4\u5219\uFF0C\u70B9\u51FB\u4E0B\u65B9\u6309\u94AE\u65B0\u589E",
+      "filter.contains": "\u5305\u542B",
+      "filter.keywordPlaceholder": "\u5173\u952E\u8BCD",
+      "color.title": "\u5206\u7C7B\u914D\u8272",
+      "color.helper": "\u6807\u7B7E\uFF1A\u586B\u5199\u6807\u7B7E\u540D\uFF08\u4E0D\u542B#\uFF09\uFF0C\u5982 \u5DE5\u4F5C\u3001\u6570\u5B66\u3002\u4F18\u5148\u7EA7\uFF1A\u586B\u5199 high / medium / low / none\u3002\u63CF\u8FF0\uFF1A\u586B\u5199\u5173\u952E\u8BCD\u5339\u914D\u4EFB\u52A1\u6587\u672C\u3002",
+      "color.add": "+ \u65B0\u589E\u89C4\u5219",
+      "color.empty": "\u6682\u65E0\u89C4\u5219\uFF0C\u70B9\u51FB\u4E0B\u65B9\u6309\u94AE\u65B0\u589E",
+      "color.modeBar": "\u6807\u7B7E\u6761",
+      "color.modeBlock": "\u6574\u5757",
+      "color.blockPreset": "\u6574\u5757\u5E95\u8272\u63A8\u8350",
+      "query.title": "\u626B\u63CF\u8DEF\u5F84",
+      "query.desc": "\u9009\u62E9\u8981\u626B\u63CF\u4EFB\u52A1\u7684\u6587\u4EF6\u5939\u6216\u6587\u4EF6\u3002\u9ED8\u8BA4\u626B\u63CF\u6240\u6709\u6587\u4EF6\u3002",
+      "query.add": "+ \u65B0\u589E\u8DEF\u5F84",
+      "query.empty": "\u6682\u65E0\u8DEF\u5F84\uFF0C\u9ED8\u8BA4\u626B\u63CF\u6240\u6709\u6587\u4EF6",
+      "query.allFiles": "(\u6240\u6709\u6587\u4EF6)",
+      "prop.tags": "\u6807\u7B7E",
+      "prop.priority": "\u4F18\u5148\u7EA7",
+      "prop.description": "\u63CF\u8FF0"
+    };
+    en = {
+      "mode.month": "Month",
+      "mode.week": "Week",
+      "toolbar.scanPaths": "Scan Paths",
+      "toolbar.colorRules": "Color Rules",
+      "toolbar.filter": "Filter",
+      "header.today": "Today",
+      "axis.adjustStart": "Adjust start date",
+      "axis.adjustDue": "Adjust due date",
+      "ctx.newTask": "New Task",
+      "create.title": "New Task",
+      "create.placeholder": "Task description",
+      "common.cancel": "Cancel",
+      "common.create": "Create",
+      "common.save": "Save",
+      "common.done": "Done",
+      "notice.updateFailed": "Could not update the task date. The task line may have been modified.",
+      "filter.title": "Filter Rules",
+      "filter.helper": "Tags: enter the tag name (without #), e.g. work, math. Priority: enter high / medium / low / none. Description: enter a keyword that matches task text.",
+      "filter.add": "+ Add Filter",
+      "filter.empty": "No filter rules yet. Add one below.",
+      "filter.contains": "contains",
+      "filter.keywordPlaceholder": "Keyword",
+      "color.title": "Color Rules",
+      "color.helper": "Tags: enter the tag name (without #), e.g. work, math. Priority: enter high / medium / low / none. Description: enter a keyword that matches task text.",
+      "color.add": "+ Add Rule",
+      "color.empty": "No rules yet. Add one below.",
+      "color.modeBar": "Bar",
+      "color.modeBlock": "Block",
+      "color.blockPreset": "Block tint suggestions",
+      "query.title": "Scan Paths",
+      "query.desc": "Choose folders or files to scan for tasks. Defaults to scanning all files.",
+      "query.add": "+ Add Path",
+      "query.empty": "No paths configured. Scanning all files.",
+      "query.allFiles": "(All files)",
+      "prop.tags": "Tags",
+      "prop.priority": "Priority",
+      "prop.description": "Description"
+    };
   }
 });
 
@@ -255,48 +375,50 @@ var init_settings = __esm({
 });
 
 // colorRulesModal.ts
-var import_obsidian2, DISPLAY_MODE_LABEL, PROPERTY_LABELS, ColorRulesModal;
+var import_obsidian2, DISPLAY_MODE_KEYS, PROPERTY_LABEL_KEYS, ColorRulesModal;
 var init_colorRulesModal = __esm({
   "colorRulesModal.ts"() {
     import_obsidian2 = require("obsidian");
     init_settings();
-    DISPLAY_MODE_LABEL = {
-      bar: "\u6807\u7B7E\u6761",
-      block: "\u6574\u5757"
+    init_i18n();
+    DISPLAY_MODE_KEYS = {
+      bar: "color.modeBar",
+      block: "color.modeBlock"
     };
-    PROPERTY_LABELS = {
-      tags: "\u6807\u7B7E",
-      priority: "\u4F18\u5148\u7EA7",
-      description: "\u63CF\u8FF0"
+    PROPERTY_LABEL_KEYS = {
+      tags: "prop.tags",
+      priority: "prop.priority",
+      description: "prop.description"
     };
     ColorRulesModal = class extends import_obsidian2.Modal {
       constructor(app, plugin) {
         super(app);
         this.plugin = plugin;
+        this.t = createTranslator(app);
         this.rules = plugin.settings.colorRules.map((r) => ({ ...r }));
       }
       onOpen() {
         const { contentEl } = this;
         contentEl.empty();
         contentEl.addClass("color-rules-modal");
-        contentEl.createEl("h3", { text: "\u5206\u7C7B\u914D\u8272" });
+        contentEl.createEl("h3", { text: this.t("color.title") });
         contentEl.createEl("div", {
           cls: "modal-helper-text",
-          text: "\u6807\u7B7E\uFF1A\u586B\u5199\u6807\u7B7E\u540D\uFF08\u4E0D\u542B#\uFF09\uFF0C\u5982 \u5DE5\u4F5C\u3001\u6570\u5B66\u3002\u4F18\u5148\u7EA7\uFF1A\u586B\u5199 high / medium / low / none\u3002\u63CF\u8FF0\uFF1A\u586B\u5199\u5173\u952E\u8BCD\u5339\u914D\u4EFB\u52A1\u6587\u672C\u3002"
+          text: this.t("color.helper")
         });
         this.contentArea = contentEl.createDiv({ cls: "color-rules-list" });
         this.renderRuleList();
         const addBtn = contentEl.createEl("button", {
           cls: "color-rules-add-btn",
-          text: "+ \u65B0\u589E\u89C4\u5219"
+          text: this.t("color.add")
         });
         addBtn.addEventListener("click", () => this.addRule());
         const footer = contentEl.createDiv({ cls: "color-rules-footer" });
-        const cancelBtn = footer.createEl("button", { text: "\u53D6\u6D88" });
+        const cancelBtn = footer.createEl("button", { text: this.t("common.cancel") });
         cancelBtn.addEventListener("click", () => this.close());
         const saveBtn = footer.createEl("button", {
           cls: "mod-cta",
-          text: "\u5B8C\u6210"
+          text: this.t("common.done")
         });
         saveBtn.addEventListener("click", () => {
           this.plugin.settings.colorRules = this.rules.filter(
@@ -315,7 +437,7 @@ var init_colorRulesModal = __esm({
         if (this.rules.length === 0) {
           this.contentArea.createDiv({
             cls: "color-rules-empty",
-            text: "\u6682\u65E0\u89C4\u5219\uFF0C\u70B9\u51FB\u4E0B\u65B9\u6309\u94AE\u65B0\u589E"
+            text: this.t("color.empty")
           });
           return;
         }
@@ -329,8 +451,8 @@ var init_colorRulesModal = __esm({
             this.showColorPicker(colorSwatch, rule);
           });
           const propSelect = row.createEl("select", { cls: "color-rule-field" });
-          for (const [value, label] of Object.entries(PROPERTY_LABELS)) {
-            propSelect.createEl("option", { text: label, value });
+          for (const [value, key] of Object.entries(PROPERTY_LABEL_KEYS)) {
+            propSelect.createEl("option", { text: this.t(key), value });
           }
           propSelect.value = rule.property;
           propSelect.addEventListener("change", () => {
@@ -341,18 +463,18 @@ var init_colorRulesModal = __esm({
             cls: "color-rule-keyword",
             type: "text",
             value: rule.keyword,
-            attr: { placeholder: "\u5173\u952E\u8BCD" }
+            attr: { placeholder: this.t("filter.keywordPlaceholder") }
           });
           keywordInput.addEventListener("input", () => {
             rule.keyword = keywordInput.value;
           });
           const modeBtn = row.createEl("button", {
             cls: "color-rule-mode-btn",
-            text: DISPLAY_MODE_LABEL[rule.displayMode]
+            text: this.t(DISPLAY_MODE_KEYS[rule.displayMode])
           });
           modeBtn.addEventListener("click", () => {
             rule.displayMode = rule.displayMode === "bar" ? "block" : "bar";
-            modeBtn.setText(DISPLAY_MODE_LABEL[rule.displayMode]);
+            modeBtn.setText(this.t(DISPLAY_MODE_KEYS[rule.displayMode]));
           });
           const toggleWrapper = row.createDiv({ cls: "color-rule-toggle" });
           const toggle = toggleWrapper.createEl("input", {
@@ -403,7 +525,7 @@ var init_colorRulesModal = __esm({
             this.renderRuleList();
           });
         }
-        const sep = popover.createDiv({ cls: "color-picker-sep", text: "\u6574\u5757\u5E95\u8272\u63A8\u8350" });
+        const sep = popover.createDiv({ cls: "color-picker-sep", text: this.t("color.blockPreset") });
         const grid2 = popover.createDiv({ cls: "color-picker-grid" });
         for (const c of PRESET_COLORS.slice(16)) {
           const swatch = grid2.createDiv({ cls: "color-picker-swatch" });
@@ -439,43 +561,45 @@ var init_colorRulesModal = __esm({
 });
 
 // filterModal.ts
-var import_obsidian3, PROPERTY_LABELS2, FilterModal;
+var import_obsidian3, PROPERTY_LABEL_KEYS2, FilterModal;
 var init_filterModal = __esm({
   "filterModal.ts"() {
     import_obsidian3 = require("obsidian");
-    PROPERTY_LABELS2 = {
-      tags: "\u6807\u7B7E",
-      priority: "\u4F18\u5148\u7EA7",
-      description: "\u63CF\u8FF0"
+    init_i18n();
+    PROPERTY_LABEL_KEYS2 = {
+      tags: "prop.tags",
+      priority: "prop.priority",
+      description: "prop.description"
     };
     FilterModal = class extends import_obsidian3.Modal {
       constructor(app, plugin) {
         super(app);
         this.plugin = plugin;
+        this.t = createTranslator(app);
         this.rules = plugin.settings.filterRules.map((r) => ({ ...r }));
       }
       onOpen() {
         const { contentEl } = this;
         contentEl.empty();
         contentEl.addClass("filter-modal");
-        contentEl.createEl("h3", { text: "\u7B5B\u9009\u6392\u9664" });
+        contentEl.createEl("h3", { text: this.t("filter.title") });
         contentEl.createEl("div", {
           cls: "modal-helper-text",
-          text: "\u6807\u7B7E\uFF1A\u586B\u5199\u6807\u7B7E\u540D\uFF08\u4E0D\u542B#\uFF09\uFF0C\u5982 \u5DE5\u4F5C\u3001\u6570\u5B66\u3002\u4F18\u5148\u7EA7\uFF1A\u586B\u5199 high / medium / low / none\u3002\u63CF\u8FF0\uFF1A\u586B\u5199\u5173\u952E\u8BCD\u5339\u914D\u4EFB\u52A1\u6587\u672C\u3002"
+          text: this.t("filter.helper")
         });
         this.contentArea = contentEl.createDiv({ cls: "filter-rules-list" });
         this.renderRuleList();
         const addBtn = contentEl.createEl("button", {
           cls: "filter-add-btn",
-          text: "+ \u65B0\u589E\u7B5B\u9009"
+          text: this.t("filter.add")
         });
         addBtn.addEventListener("click", () => this.addRule());
         const footer = contentEl.createDiv({ cls: "filter-footer" });
-        const cancelBtn = footer.createEl("button", { text: "\u53D6\u6D88" });
+        const cancelBtn = footer.createEl("button", { text: this.t("common.cancel") });
         cancelBtn.addEventListener("click", () => this.close());
         const saveBtn = footer.createEl("button", {
           cls: "mod-cta",
-          text: "\u5B8C\u6210"
+          text: this.t("common.done")
         });
         saveBtn.addEventListener("click", () => {
           this.plugin.settings.filterRules = this.rules.filter(
@@ -494,7 +618,7 @@ var init_filterModal = __esm({
         if (this.rules.length === 0) {
           this.contentArea.createDiv({
             cls: "filter-rules-empty",
-            text: "\u6682\u65E0\u7B5B\u9009\u89C4\u5219\uFF0C\u70B9\u51FB\u4E0B\u65B9\u6309\u94AE\u65B0\u589E"
+            text: this.t("filter.empty")
           });
           return;
         }
@@ -503,19 +627,19 @@ var init_filterModal = __esm({
           const row = this.contentArea.createDiv({ cls: "filter-rule-row" });
           const selectWrapper = row.createDiv({ cls: "filter-select-wrap" });
           const select = selectWrapper.createEl("select", { cls: "filter-select" });
-          for (const [value, label] of Object.entries(PROPERTY_LABELS2)) {
-            select.createEl("option", { text: label, value });
+          for (const [value, key] of Object.entries(PROPERTY_LABEL_KEYS2)) {
+            select.createEl("option", { text: this.t(key), value });
           }
           select.value = rule.property;
           select.addEventListener("change", () => {
             rule.property = select.value;
           });
-          row.createSpan({ cls: "filter-contains", text: "\u5305\u542B" });
+          row.createSpan({ cls: "filter-contains", text: this.t("filter.contains") });
           const keywordInput = row.createEl("input", {
             cls: "filter-keyword",
             type: "text",
             value: rule.keyword,
-            attr: { placeholder: "\u5173\u952E\u8BCD" }
+            attr: { placeholder: this.t("filter.keywordPlaceholder") }
           });
           keywordInput.addEventListener("input", () => {
             rule.keyword = keywordInput.value;
@@ -557,32 +681,34 @@ var import_obsidian4, QueryPathModal;
 var init_queryPathModal = __esm({
   "queryPathModal.ts"() {
     import_obsidian4 = require("obsidian");
+    init_i18n();
     QueryPathModal = class extends import_obsidian4.Modal {
       constructor(app, plugin, onSave) {
         super(app);
         this.plugin = plugin;
         this.onSave = onSave;
+        this.t = createTranslator(app);
       }
       onOpen() {
         const { contentEl } = this;
         contentEl.empty();
         contentEl.addClass("query-path-modal");
-        contentEl.createEl("h3", { text: "\u626B\u63CF\u8DEF\u5F84" });
+        contentEl.createEl("h3", { text: this.t("query.title") });
         contentEl.createEl("p", {
           cls: "query-path-desc",
-          text: "\u9009\u62E9\u8981\u626B\u63CF\u4EFB\u52A1\u7684\u6587\u4EF6\u5939\u6216\u6587\u4EF6\u3002\u9ED8\u8BA4\u626B\u63CF\u6240\u6709\u6587\u4EF6\u3002"
+          text: this.t("query.desc")
         });
         this.pathList = contentEl.createDiv({ cls: "query-path-list" });
         this.renderPathList();
         const addBtn = contentEl.createEl("button", {
           cls: "query-path-add-btn",
-          text: "+ \u65B0\u589E\u8DEF\u5F84"
+          text: this.t("query.add")
         });
         addBtn.addEventListener("click", () => this.addPath());
         const footer = contentEl.createDiv({ cls: "query-path-footer" });
-        const cancelBtn = footer.createEl("button", { text: "\u53D6\u6D88" });
+        const cancelBtn = footer.createEl("button", { text: this.t("common.cancel") });
         cancelBtn.addEventListener("click", () => this.close());
-        const saveBtn = footer.createEl("button", { cls: "mod-cta", text: "\u4FDD\u5B58" });
+        const saveBtn = footer.createEl("button", { cls: "mod-cta", text: this.t("common.save") });
         saveBtn.addEventListener("click", () => {
           this.plugin.saveSettings().then(() => {
             this.onSave();
@@ -600,7 +726,7 @@ var init_queryPathModal = __esm({
         if (paths.length === 0) {
           this.pathList.createDiv({
             cls: "query-path-empty",
-            text: "\u6682\u65E0\u8DEF\u5F84\uFF0C\u9ED8\u8BA4\u626B\u63CF\u6240\u6709\u6587\u4EF6"
+            text: this.t("query.empty")
           });
           return;
         }
@@ -608,7 +734,7 @@ var init_queryPathModal = __esm({
         const mdFiles = allFiles.filter((f) => f instanceof import_obsidian4.TFile && f.extension === "md");
         const folders = allFiles.filter((f) => f instanceof import_obsidian4.TFolder);
         const items = [
-          { value: "", label: "(\u6240\u6709\u6587\u4EF6)" },
+          { value: "", label: this.t("query.allFiles") },
           ...folders.map((f) => ({ value: f.path, label: `\u{1F4C1} ${f.path}` })),
           ...mdFiles.map((f) => ({ value: f.path, label: `\u{1F4DD} ${f.path}` }))
         ].sort((a, b) => a.label.localeCompare(b.label));
@@ -663,7 +789,7 @@ function renderCalendar(container, view) {
   renderToolbar(container, view);
   renderHeader(container, view);
   if (view.viewMode === "month") {
-    renderWeekdayHeaders(container);
+    renderWeekdayHeaders(container, view);
   }
   switch (view.viewMode) {
     case "month":
@@ -678,8 +804,8 @@ function renderToolbar(container, view) {
   const toolbar = container.createDiv({ cls: "calendar-toolbar" });
   const modeGroup = toolbar.createDiv({ cls: "calendar-mode-group" });
   const modes = [
-    { key: "month", label: "\u6708" },
-    { key: "week", label: "\u5468" }
+    { key: "month", label: view.t("mode.month") },
+    { key: "week", label: view.t("mode.week") }
   ];
   for (const m of modes) {
     const btn = modeGroup.createEl("button", {
@@ -693,7 +819,7 @@ function renderToolbar(container, view) {
   }
   const queryBtn = toolbar.createEl("button", {
     cls: "calendar-query-btn",
-    text: "\u626B\u63CF\u8DEF\u5F84"
+    text: view.t("toolbar.scanPaths")
   });
   queryBtn.addEventListener("click", () => {
     const modal = new QueryPathModal(view.app, view.plugin, () => {
@@ -703,7 +829,7 @@ function renderToolbar(container, view) {
   });
   const colorBtn = toolbar.createEl("button", {
     cls: "calendar-color-rules-btn",
-    text: "\u5206\u7C7B\u914D\u8272"
+    text: view.t("toolbar.colorRules")
   });
   colorBtn.addEventListener("click", () => {
     const modal = new ColorRulesModal(view.app, view.plugin);
@@ -712,7 +838,7 @@ function renderToolbar(container, view) {
   });
   const filterBtn = toolbar.createEl("button", {
     cls: `calendar-filter-btn${view.hasActiveFilters ? " has-filters" : ""}`,
-    text: "\u7B5B\u9009"
+    text: view.t("toolbar.filter")
   });
   filterBtn.addEventListener("click", () => {
     const modal = new FilterModal(view.app, view.plugin);
@@ -734,7 +860,7 @@ function renderHeader(container, view) {
     navigate(view, 1);
     view.render();
   });
-  const todayBtn = header.createEl("button", { cls: "calendar-today-btn", text: "\u4ECA\u5929" });
+  const todayBtn = header.createEl("button", { cls: "calendar-today-btn", text: view.t("header.today") });
   todayBtn.addEventListener("click", () => {
     view.currentDate = new Date();
     view.render();
@@ -753,29 +879,34 @@ function navigate(view, direction) {
 function headerTitle(view) {
   const y = view.currentDate.getFullYear();
   const m = view.currentDate.getMonth();
-  switch (view.viewMode) {
-    case "month":
-      return `${y}\u5E74${m + 1}\u6708`;
-    case "week": {
-      const mon = getWeekMonday(view.currentDate);
-      const sun = new Date(mon);
-      sun.setDate(sun.getDate() + 6);
-      const fmt = (dt) => `${dt.getMonth() + 1}/${dt.getDate()}`;
-      return `${y}\u5E74  ${fmt(mon)} \u2013 ${fmt(sun)}`;
-    }
+  if (view.viewMode === "month") {
+    return view.t.language === "zh" ? `${y}\u5E74${m + 1}\u6708` : `${m + 1}/${y}`;
   }
-  return "";
+  const mon = getWeekMonday(view.currentDate);
+  const sun = new Date(mon);
+  sun.setDate(sun.getDate() + 6);
+  const fmt = (dt) => `${dt.getMonth() + 1}/${dt.getDate()}`;
+  if (view.t.language === "zh") {
+    return `${y}\u5E74 ${fmt(mon)} \u2013 ${fmt(sun)}`;
+  }
+  return `${fmt(mon)} \u2013 ${fmt(sun)}, ${y}`;
 }
-function renderWeekdayHeaders(container) {
+function weekdayNames(t) {
+  if (t.language === "zh") {
+    return ["\u4E00", "\u4E8C", "\u4E09", "\u56DB", "\u4E94", "\u516D", "\u65E5"];
+  }
+  return ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+}
+function renderWeekdayHeaders(container, view) {
   const row = container.createDiv({ cls: "calendar-weekdays" });
-  for (const d of ["\u4E00", "\u4E8C", "\u4E09", "\u56DB", "\u4E94", "\u516D", "\u65E5"]) {
+  for (const d of weekdayNames(view.t)) {
     row.createDiv({ cls: "calendar-weekday", text: d });
   }
 }
 function renderMonthView(container, view) {
   const currentYear = view.currentDate.getFullYear();
   const currentMonth = view.currentDate.getMonth();
-  const todayStr = formatDateStr2(new Date());
+  const todayStr = formatDateStr(new Date());
   const firstDayOfMonth = new Date(currentYear, currentMonth, 1);
   const lastDayOfMonth = new Date(currentYear, currentMonth + 1, 0);
   const jsWeekday = firstDayOfMonth.getDay();
@@ -920,10 +1051,10 @@ function renderMonthView(container, view) {
           view.openTaskFile(task);
         });
         const leftHit = bar.createDiv({ cls: "month-bar-hit-left" });
-        leftHit.setAttr("title", "\u8C03\u6574\u8D77\u59CB\u65E5\u671F");
+        leftHit.setAttr("title", view.t("axis.adjustStart"));
         setupBarResize(leftHit, task, "start", weekRow, view);
         const rightHit = bar.createDiv({ cls: "month-bar-hit-right" });
-        rightHit.setAttr("title", "\u8C03\u6574\u7EC8\u6B62\u65E5\u671F");
+        rightHit.setAttr("title", view.t("axis.adjustDue"));
         setupBarResize(rightHit, task, "due", weekRow, view);
       }
     }
@@ -952,12 +1083,12 @@ function renderMonthView(container, view) {
 function renderWeekView(container, view) {
   const mon = getWeekMonday(view.currentDate);
   const grid = container.createDiv({ cls: "calendar-week-grid" });
-  const todayStr = formatDateStr2(new Date());
-  const dayNames = ["\u4E00", "\u4E8C", "\u4E09", "\u56DB", "\u4E94", "\u516D", "\u65E5"];
+  const todayStr = formatDateStr(new Date());
+  const dayNames = weekdayNames(view.t);
   for (let i = 0; i < 7; i++) {
     const d = new Date(mon);
     d.setDate(d.getDate() + i);
-    const dateStr = formatDateStr2(d);
+    const dateStr = formatDateStr(d);
     const tasks = view.getTasksForDate(dateStr);
     const isToday = dateStr === todayStr;
     const col = grid.createDiv({ cls: `calendar-week-col${isToday ? " today" : ""}` });
@@ -1014,10 +1145,10 @@ function createTaskCard(task, view, viewContext, weekRow) {
   });
   if (viewContext === "month" && weekRow) {
     const leftHit = card.createDiv({ cls: "card-hit-left" });
-    leftHit.setAttr("title", "\u8C03\u6574\u8D77\u59CB\u65E5\u671F");
+    leftHit.setAttr("title", view.t("axis.adjustStart"));
     setupBarResize(leftHit, task, "start", weekRow, view);
     const rightHit = card.createDiv({ cls: "card-hit-right" });
-    rightHit.setAttr("title", "\u8C03\u6574\u7EC8\u6B62\u65E5\u671F");
+    rightHit.setAttr("title", view.t("axis.adjustDue"));
     setupBarResize(rightHit, task, "due", weekRow, view);
   }
   return card;
@@ -1058,14 +1189,14 @@ function setupBarResize(hitEl, task, field, weekRow, view) {
     const onMouseMove = (e2) => {
       const deltaX = e2.clientX - startX;
       const deltaDays = Math.round(deltaX / Math.max(dayWidth, 20));
-      const newDate = addDays2(fixedDate, deltaDays);
+      const newDate = addDays(fixedDate, deltaDays);
       tooltip.setText(newDate);
       updateTooltipPos(tooltip, e2.clientX, e2.clientY);
     };
     const onMouseUp = async (e2) => {
       const deltaX = e2.clientX - startX;
       const deltaDays = Math.round(deltaX / Math.max(dayWidth, 20));
-      const newDate = addDays2(fixedDate, deltaDays);
+      const newDate = addDays(fixedDate, deltaDays);
       tooltip.remove();
       document.removeEventListener("mousemove", onMouseMove);
       document.removeEventListener("mouseup", onMouseUp);
@@ -1103,24 +1234,27 @@ function setupContextMenu(el, view, dateStr) {
     e.preventDefault();
     const menu = new import_obsidian5.Menu();
     menu.addItem((item) => {
-      item.setTitle("\u65B0\u5EFA\u4EFB\u52A1").setIcon("file-plus").onClick(() => showCreateTaskModal(view.app, view, dateStr));
+      item.setTitle(view.t("ctx.newTask")).setIcon("file-plus").onClick(() => showCreateTaskModal(view.app, view, dateStr));
     });
     menu.showAtPosition({ x: e.clientX, y: e.clientY });
   });
 }
 function showCreateTaskModal(app, view, dateStr) {
   const modalEl = document.body.createDiv({ cls: "calendar-create-modal" });
-  modalEl.createEl("div", { cls: "calendar-create-title", text: `\u65B0\u5EFA\u4EFB\u52A1 \u2014 ${dateStr}` });
+  modalEl.createEl("div", {
+    cls: "calendar-create-title",
+    text: `${view.t("create.title")} \u2014 ${dateStr}`
+  });
   const input = modalEl.createEl("input", {
     cls: "calendar-create-input",
     type: "text",
-    attr: { placeholder: "\u4EFB\u52A1\u63CF\u8FF0" }
+    attr: { placeholder: view.t("create.placeholder") }
   });
   input.focus();
   const footer = modalEl.createDiv({ cls: "calendar-create-footer" });
-  const cancelBtn = footer.createEl("button", { text: "\u53D6\u6D88" });
+  const cancelBtn = footer.createEl("button", { text: view.t("common.cancel") });
   cancelBtn.addEventListener("click", () => modalEl.remove());
-  const okBtn = footer.createEl("button", { cls: "mod-cta", text: "\u521B\u5EFA" });
+  const okBtn = footer.createEl("button", { cls: "mod-cta", text: view.t("common.create") });
   okBtn.addEventListener("click", async () => {
     const title = input.value.trim();
     if (!title)
@@ -1154,7 +1288,12 @@ async function createTaskForDate(app, view, dateStr, description) {
 - [ ] ${description} \u{1F6EB} ${dateStr}`;
     await app.vault.modify(file, newContent);
   }
-  await view.loadTasks();
+  const target = app.vault.getAbstractFileByPath(fullPath);
+  if (target instanceof import_obsidian5.TFile) {
+    await view.loadTasks({ files: [target] });
+  } else {
+    await view.loadTasks();
+  }
   view.render();
 }
 function isTaskFiltered(view, task) {
@@ -1184,20 +1323,9 @@ function rangesOverlap(a, b) {
 function daySpan(task) {
   if (!task.startDate || !task.dueDate)
     return 1;
-  const s = new Date(task.startDate);
-  const e = new Date(task.dueDate);
+  const s = parseLocalDate(task.startDate);
+  const e = parseLocalDate(task.dueDate);
   return Math.round((e.getTime() - s.getTime()) / (1e3 * 60 * 60 * 24)) + 1;
-}
-function addDays2(dateStr, days) {
-  const d = new Date(dateStr);
-  d.setDate(d.getDate() + days);
-  return formatDateStr2(d);
-}
-function formatDateStr2(d) {
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-function pad(n) {
-  return String(n).padStart(2, "0");
 }
 function getWeekMonday(date) {
   const d = new Date(date);
@@ -1215,6 +1343,7 @@ var init_calendar = __esm({
     init_filterModal();
     init_queryPathModal();
     init_taskParser();
+    init_dateUtils();
   }
 });
 
@@ -1229,15 +1358,18 @@ var import_obsidian7 = require("obsidian");
 // view.ts
 var import_obsidian6 = require("obsidian");
 init_taskParser();
+init_i18n();
 var VIEW_TYPE_CALENDAR = "task-calendar-view";
 var TaskCalendarView = class extends import_obsidian6.ItemView {
   constructor(leaf, plugin) {
     super(leaf);
     this._renderTimeout = null;
-    this._allTasks = [];
+    // Per-file parsed tasks so a single file change never rescans the whole vault.
+    this._taskCache = /* @__PURE__ */ new Map();
     this.plugin = plugin;
     this.currentDate = new Date();
     this.viewMode = "month";
+    this.t = createTranslator(plugin.app);
   }
   getViewType() {
     return VIEW_TYPE_CALENDAR;
@@ -1252,21 +1384,28 @@ var TaskCalendarView = class extends import_obsidian6.ItemView {
     this.registerEvent(
       this.app.metadataCache.on("changed", (file) => {
         if (file.extension === "md") {
-          this.scheduleRender();
+          this.scheduleRender({ files: [file] });
         }
       })
     );
     this.registerEvent(
       this.app.vault.on("delete", (file) => {
         if (file instanceof import_obsidian6.TFile && file.extension === "md") {
-          this.scheduleRender();
+          this.scheduleRender({ deletedPaths: [file.path] });
         }
       })
     );
     this.registerEvent(
       this.app.vault.on("create", (file) => {
         if (file instanceof import_obsidian6.TFile && file.extension === "md") {
-          this.scheduleRender();
+          this.scheduleRender({ files: [file] });
+        }
+      })
+    );
+    this.registerEvent(
+      this.app.vault.on("rename", (file, oldPath) => {
+        if (file instanceof import_obsidian6.TFile && file.extension === "md") {
+          this.scheduleRender({ renamed: { file, oldPath } });
         }
       })
     );
@@ -1276,21 +1415,47 @@ var TaskCalendarView = class extends import_obsidian6.ItemView {
   async onClose() {
     this.containerEl.empty();
   }
-  scheduleRender() {
+  scheduleRender(update) {
     if (this._renderTimeout) {
       window.clearTimeout(this._renderTimeout);
     }
     this._renderTimeout = window.setTimeout(async () => {
       this._renderTimeout = null;
-      await this.loadTasks();
+      await this.loadTasks(update);
       this.render();
     }, 250);
   }
-  async loadTasks() {
-    this._allTasks = await getAllTasks(
-      this.app,
-      this.plugin.settings.queryPaths
-    );
+  /**
+   * Without an update this rescans every file in scope (initial open, or the
+   * query paths changed). With an update only the affected files are
+   * re-parsed; the rest of the cache is reused.
+   */
+  async loadTasks(update) {
+    var _a, _b;
+    if (!update) {
+      this._taskCache.clear();
+      for (const file of getQueryFiles(
+        this.app,
+        this.plugin.settings.queryPaths
+      )) {
+        const content = await this.app.vault.read(file);
+        this._taskCache.set(file.path, parseFileTasks(content, file.path));
+      }
+      return;
+    }
+    if (update.renamed) {
+      this._taskCache.delete(update.renamed.oldPath);
+    }
+    for (const path of (_a = update.deletedPaths) != null ? _a : []) {
+      this._taskCache.delete(path);
+    }
+    for (const file of (_b = update.files) != null ? _b : []) {
+      if (!isFileInQueryPaths(file.path, this.plugin.settings.queryPaths)) {
+        continue;
+      }
+      const content = await this.app.vault.read(file);
+      this._taskCache.set(file.path, parseFileTasks(content, file.path));
+    }
   }
   render() {
     if (this._renderTimeout) {
@@ -1303,7 +1468,11 @@ var TaskCalendarView = class extends import_obsidian6.ItemView {
     renderCalendar2(container, this);
   }
   get allTasks() {
-    return this._allTasks;
+    const result = [];
+    for (const tasks of this._taskCache.values()) {
+      result.push(...tasks);
+    }
+    return result;
   }
   get hasActiveFilters() {
     return this.plugin.settings.filterRules.some(
@@ -1383,7 +1552,7 @@ var TaskCalendarView = class extends import_obsidian6.ItemView {
   }
   // ── Tasks grouping ─────────────────────────────────────
   getTasksWithDate() {
-    const filtered = this._allTasks.filter((t) => !this.isTaskFiltered(t));
+    const filtered = this.allTasks.filter((t) => !this.isTaskFiltered(t));
     const byDate = groupTasksByDate(filtered);
     for (const [dateStr, tasks] of byDate) {
       tasks.sort((a, b) => {
@@ -1397,7 +1566,7 @@ var TaskCalendarView = class extends import_obsidian6.ItemView {
     return byDate;
   }
   getTasksForDate(dateStr) {
-    const filtered = this._allTasks.filter((t) => !this.isTaskFiltered(t));
+    const filtered = this.allTasks.filter((t) => !this.isTaskFiltered(t));
     return filtered.filter((t) => {
       if (!t.startDate)
         return false;
@@ -1407,15 +1576,43 @@ var TaskCalendarView = class extends import_obsidian6.ItemView {
   }
   // ── Date update ────────────────────────────────────────
   async updateTaskDate(task, newStartDate, newDueDate) {
-    await updateTaskDates(this.app, task, newStartDate, newDueDate);
-    await this.loadTasks();
+    const ok = await updateTaskDates(
+      this.app,
+      task,
+      newStartDate,
+      newDueDate
+    );
+    if (!ok) {
+      new import_obsidian6.Notice(this.t("notice.updateFailed"));
+      return false;
+    }
+    await this.refreshTaskFile(task);
     this.render();
+    return true;
   }
   async shiftTask(task, days) {
     const shifted = shiftTaskDates(task, days);
-    await updateTaskDates(this.app, task, shifted.startDate, shifted.dueDate);
-    await this.loadTasks();
+    const ok = await updateTaskDates(
+      this.app,
+      task,
+      shifted.startDate,
+      shifted.dueDate
+    );
+    if (!ok) {
+      new import_obsidian6.Notice(this.t("notice.updateFailed"));
+      return false;
+    }
+    await this.refreshTaskFile(task);
     this.render();
+    return true;
+  }
+  async refreshTaskFile(task) {
+    const file = this.app.vault.getAbstractFileByPath(task.filePath);
+    if (file instanceof import_obsidian6.TFile) {
+      await this.loadTasks({ files: [file] });
+    } else {
+      await this.loadTasks();
+    }
   }
   // ── Open file at line ──────────────────────────────────
   async openTaskFile(task) {

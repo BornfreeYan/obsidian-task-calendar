@@ -1,22 +1,41 @@
-import { ItemView, WorkspaceLeaf, TFile } from "obsidian";
+import { ItemView, WorkspaceLeaf, TFile, Notice } from "obsidian";
 import TaskCalendarPlugin from "./main";
 import { ColorRule, FilterRule, ViewMode } from "./settings";
-import { getAllTasks, groupTasksByDate, updateTaskDates, shiftTaskDates, Task, isMultiDayTask } from "./taskParser";
+import {
+  getQueryFiles,
+  isFileInQueryPaths,
+  groupTasksByDate,
+  parseFileTasks,
+  updateTaskDates,
+  shiftTaskDates,
+  Task,
+  isMultiDayTask,
+} from "./taskParser";
+import { createTranslator, Translator } from "./i18n";
 
 export const VIEW_TYPE_CALENDAR = "task-calendar-view";
+
+interface TaskUpdate {
+  files?: TFile[];
+  deletedPaths?: string[];
+  renamed?: { file: TFile; oldPath: string };
+}
 
 export class TaskCalendarView extends ItemView {
   plugin: TaskCalendarPlugin;
   currentDate: Date;
   viewMode: ViewMode;
+  t: Translator;
   private _renderTimeout: number | null = null;
-  private _allTasks: Task[] = [];
+  // Per-file parsed tasks so a single file change never rescans the whole vault.
+  private _taskCache = new Map<string, Task[]>();
 
   constructor(leaf: WorkspaceLeaf, plugin: TaskCalendarPlugin) {
     super(leaf);
     this.plugin = plugin;
     this.currentDate = new Date();
     this.viewMode = "month";
+    this.t = createTranslator(plugin.app);
   }
 
   getViewType() {
@@ -35,7 +54,7 @@ export class TaskCalendarView extends ItemView {
     this.registerEvent(
       this.app.metadataCache.on("changed", (file) => {
         if (file.extension === "md") {
-          this.scheduleRender();
+          this.scheduleRender({ files: [file] });
         }
       })
     );
@@ -43,7 +62,7 @@ export class TaskCalendarView extends ItemView {
     this.registerEvent(
       this.app.vault.on("delete", (file) => {
         if (file instanceof TFile && file.extension === "md") {
-          this.scheduleRender();
+          this.scheduleRender({ deletedPaths: [file.path] });
         }
       })
     );
@@ -51,7 +70,15 @@ export class TaskCalendarView extends ItemView {
     this.registerEvent(
       this.app.vault.on("create", (file) => {
         if (file instanceof TFile && file.extension === "md") {
-          this.scheduleRender();
+          this.scheduleRender({ files: [file] });
+        }
+      })
+    );
+
+    this.registerEvent(
+      this.app.vault.on("rename", (file, oldPath) => {
+        if (file instanceof TFile && file.extension === "md") {
+          this.scheduleRender({ renamed: { file, oldPath } });
         }
       })
     );
@@ -64,22 +91,50 @@ export class TaskCalendarView extends ItemView {
     this.containerEl.empty();
   }
 
-  private scheduleRender() {
+  private scheduleRender(update?: TaskUpdate) {
     if (this._renderTimeout) {
       window.clearTimeout(this._renderTimeout);
     }
     this._renderTimeout = window.setTimeout(async () => {
       this._renderTimeout = null;
-      await this.loadTasks();
+      await this.loadTasks(update);
       this.render();
     }, 250);
   }
 
-  async loadTasks() {
-    this._allTasks = await getAllTasks(
-      this.app,
-      this.plugin.settings.queryPaths
-    );
+  /**
+   * Without an update this rescans every file in scope (initial open, or the
+   * query paths changed). With an update only the affected files are
+   * re-parsed; the rest of the cache is reused.
+   */
+  async loadTasks(update?: TaskUpdate) {
+    if (!update) {
+      this._taskCache.clear();
+      for (const file of getQueryFiles(
+        this.app,
+        this.plugin.settings.queryPaths
+      )) {
+        const content = await this.app.vault.read(file);
+        this._taskCache.set(file.path, parseFileTasks(content, file.path));
+      }
+      return;
+    }
+
+    if (update.renamed) {
+      this._taskCache.delete(update.renamed.oldPath);
+    }
+    for (const path of update.deletedPaths ?? []) {
+      this._taskCache.delete(path);
+    }
+    for (const file of update.files ?? []) {
+      if (
+        !isFileInQueryPaths(file.path, this.plugin.settings.queryPaths)
+      ) {
+        continue;
+      }
+      const content = await this.app.vault.read(file);
+      this._taskCache.set(file.path, parseFileTasks(content, file.path));
+    }
   }
 
   render() {
@@ -95,7 +150,11 @@ export class TaskCalendarView extends ItemView {
   }
 
   get allTasks(): Task[] {
-    return this._allTasks;
+    const result: Task[] = [];
+    for (const tasks of this._taskCache.values()) {
+      result.push(...tasks);
+    }
+    return result;
   }
 
   get hasActiveFilters(): boolean {
@@ -188,7 +247,7 @@ export class TaskCalendarView extends ItemView {
   // ── Tasks grouping ─────────────────────────────────────
 
   getTasksWithDate(): Map<string, Task[]> {
-    const filtered = this._allTasks.filter((t) => !this.isTaskFiltered(t));
+    const filtered = this.allTasks.filter((t) => !this.isTaskFiltered(t));
     const byDate = groupTasksByDate(filtered);
 
     // Sort tasks within each date
@@ -205,7 +264,7 @@ export class TaskCalendarView extends ItemView {
   }
 
   getTasksForDate(dateStr: string): Task[] {
-    const filtered = this._allTasks.filter((t) => !this.isTaskFiltered(t));
+    const filtered = this.allTasks.filter((t) => !this.isTaskFiltered(t));
     return filtered.filter((t) => {
       if (!t.startDate) return false;
       const end = t.dueDate || t.startDate;
@@ -215,18 +274,50 @@ export class TaskCalendarView extends ItemView {
 
   // ── Date update ────────────────────────────────────────
 
-  async updateTaskDate(task: Task, newStartDate: string, newDueDate: string) {
-    await updateTaskDates(this.app, task, newStartDate, newDueDate);
-    // Refresh cache
-    await this.loadTasks();
+  async updateTaskDate(
+    task: Task,
+    newStartDate: string,
+    newDueDate: string
+  ): Promise<boolean> {
+    const ok = await updateTaskDates(
+      this.app,
+      task,
+      newStartDate,
+      newDueDate
+    );
+    if (!ok) {
+      new Notice(this.t("notice.updateFailed"));
+      return false;
+    }
+    await this.refreshTaskFile(task);
     this.render();
+    return true;
   }
 
-  async shiftTask(task: Task, days: number) {
+  async shiftTask(task: Task, days: number): Promise<boolean> {
     const shifted = shiftTaskDates(task, days);
-    await updateTaskDates(this.app, task, shifted.startDate, shifted.dueDate);
-    await this.loadTasks();
+    const ok = await updateTaskDates(
+      this.app,
+      task,
+      shifted.startDate,
+      shifted.dueDate
+    );
+    if (!ok) {
+      new Notice(this.t("notice.updateFailed"));
+      return false;
+    }
+    await this.refreshTaskFile(task);
     this.render();
+    return true;
+  }
+
+  private async refreshTaskFile(task: Task) {
+    const file = this.app.vault.getAbstractFileByPath(task.filePath);
+    if (file instanceof TFile) {
+      await this.loadTasks({ files: [file] });
+    } else {
+      await this.loadTasks();
+    }
   }
 
   // ── Open file at line ──────────────────────────────────

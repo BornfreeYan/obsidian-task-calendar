@@ -1,15 +1,18 @@
 import { App, Modal, TFile, TFolder } from "obsidian";
 import TaskCalendarPlugin from "./main";
+import { createTranslator, Translator } from "./i18n";
 
 export class QueryPathModal extends Modal {
   plugin: TaskCalendarPlugin;
   private onSave: () => void;
   private pathList: HTMLElement;
+  private t: Translator;
 
   constructor(app: App, plugin: TaskCalendarPlugin, onSave: () => void) {
     super(app);
     this.plugin = plugin;
     this.onSave = onSave;
+    this.t = createTranslator(app);
   }
 
   onOpen() {
@@ -17,10 +20,10 @@ export class QueryPathModal extends Modal {
     contentEl.empty();
     contentEl.addClass("query-path-modal");
 
-    contentEl.createEl("h3", { text: "\u626b\u63cf\u8def\u5f84" });
+    contentEl.createEl("h3", { text: this.t("query.title") });
     contentEl.createEl("p", {
       cls: "query-path-desc",
-      text: "\u9009\u62e9\u8981\u626b\u63cf\u4efb\u52a1\u7684\u6587\u4ef6\u5939\u6216\u6587\u4ef6\u3002\u9ed8\u8ba4\u626b\u63cf\u6240\u6709\u6587\u4ef6\u3002",
+      text: this.t("query.desc"),
     });
 
     this.pathList = contentEl.createDiv({ cls: "query-path-list" });
@@ -28,16 +31,16 @@ export class QueryPathModal extends Modal {
 
     const addBtn = contentEl.createEl("button", {
       cls: "query-path-add-btn",
-      text: "+ \u65b0\u589e\u8def\u5f84",
+      text: this.t("query.add"),
     });
     addBtn.addEventListener("click", () => this.addPath());
 
     const footer = contentEl.createDiv({ cls: "query-path-footer" });
 
-    const cancelBtn = footer.createEl("button", { text: "\u53d6\u6d88" });
+    const cancelBtn = footer.createEl("button", { text: this.t("common.cancel") });
     cancelBtn.addEventListener("click", () => this.close());
 
-    const saveBtn = footer.createEl("button", { cls: "mod-cta", text: "\u4fdd\u5b58" });
+    const saveBtn = footer.createEl("button", { cls: "mod-cta", text: this.t("common.save") });
     saveBtn.addEventListener("click", () => {
       this.plugin.saveSettings().then(() => {
         this.onSave();
@@ -58,7 +61,7 @@ export class QueryPathModal extends Modal {
     if (paths.length === 0) {
       this.pathList.createDiv({
         cls: "query-path-empty",
-        text: "\u6682\u65e0\u8def\u5f84\uff0c\u9ed8\u8ba4\u626b\u63cf\u6240\u6709\u6587\u4ef6",
+        text: this.t("query.empty"),
       });
       return;
     }
@@ -69,7 +72,7 @@ export class QueryPathModal extends Modal {
     const folders = allFiles.filter((f) => f instanceof TFolder) as TFolder[];
 
     const items = [
-      { value: "", label: "(\u6240\u6709\u6587\u4ef6)" },
+      { value: "", label: this.t("query.allFiles") },
       ...folders.map((f) => ({ value: f.path, label: `\ud83d\udcc1 ${f.path}` })),
       ...mdFiles.map((f) => ({ value: f.path, label: `\ud83d\udcdd ${f.path}` })),
     ].sort((a, b) => a.label.localeCompare(b.label));
