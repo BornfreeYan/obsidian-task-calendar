@@ -17,7 +17,7 @@ jobs:
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
@@ -31,7 +31,6 @@ jobs:
           mkdir ${{ github.event.repository.name }}
           cp main.js manifest.json styles.css ${{ github.event.repository.name }}
           zip -r ${{ github.event.repository.name }}.zip ${{ github.event.repository.name }}
-          cp main.js manifest.json styles.css .
 
       - name: Create release
         uses: softprops/action-gh-release@v2
