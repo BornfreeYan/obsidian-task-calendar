@@ -25,25 +25,15 @@ export interface TaskQueryPath {
   enabled: boolean;
 }
 
-export interface Project {
-  id: string;
-  name: string;
-  filterType: "path" | "tag";
-  filterValue: string;
-  enabled: boolean;
-}
-
 export interface TaskCalendarSettings {
   colorRules: ColorRule[];
   filterRules: FilterRule[];
-  projects: Project[];
   queryPaths: TaskQueryPath[];
 }
 
 export const DEFAULT_SETTINGS: TaskCalendarSettings = {
   colorRules: [],
   filterRules: [],
-  projects: [],
   queryPaths: [
     { id: "default", path: "", enabled: true },
   ],

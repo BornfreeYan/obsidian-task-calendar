@@ -260,7 +260,7 @@ function renderMonthView(container: HTMLElement, view: TaskCalendarView) {
           break;
         }
       }
-      if (!placed && incLanes.length < 4) {
+      if (!placed) {
         incLanes.push([task]);
       }
     }
@@ -274,7 +274,7 @@ function renderMonthView(container: HTMLElement, view: TaskCalendarView) {
           break;
         }
       }
-      if (!placed && compLanes.length < 4) {
+      if (!placed) {
         compLanes.push([task]);
       }
     }
@@ -342,49 +342,20 @@ function renderMonthView(container: HTMLElement, view: TaskCalendarView) {
         cls: `calendar-day-cell${day.isOtherMonth ? " other-month" : ""}${day.isToday ? " today" : ""}`,
       });
 
-      const dayTasks = filteredTasks.filter((t) => {
+      const singleDayTasks = filteredTasks.filter((t) => {
         if (!t.startDate) return false;
-        const end = t.dueDate || t.startDate;
-        return day.dateStr >= t.startDate && day.dateStr <= end;
+        if (isMultiDayTask(t)) return false;
+        return day.dateStr === t.startDate;
       });
 
-      // Count multi-day bars covering this day
-      const multiBarCount = lanes.filter((lane) =>
-        lane.some((t) => {
-          const end = t.dueDate || t.startDate!;
-          return day.dateStr >= t.startDate! && day.dateStr <= end;
-        })
-      ).length;
-
-      const maxVisible = 5;
-      const availableSlots = Math.max(0, maxVisible - multiBarCount);
-
-      // Cards: overflow multi-day + single-day; completed tasks sink to bottom
-      const overflowMulti = dayTasks.filter((t) =>
-        isMultiDayTask(t) && !lanes.some((lane) => lane.includes(t))
-      );
-      const singleDayTasks = dayTasks.filter((t) => !isMultiDayTask(t));
-
-      const allCards = [...overflowMulti, ...singleDayTasks];
+      const allCards = [...singleDayTasks];
       allCards.sort((a, b) => (a.completed ? 1 : 0) - (b.completed ? 1 : 0));
 
-      const visibleCards = allCards.slice(0, availableSlots);
-      const hiddenCount = allCards.length - availableSlots;
-
       const tasksContainer = dayEl.createDiv({ cls: "calendar-notes" });
-      for (const task of visibleCards) {
+      for (const task of allCards) {
         tasksContainer.appendChild(
           createTaskCard(task, view, "month", weekRow)
         );
-      }
-
-      if (hiddenCount > 0) {
-        const overflowBtn = dayEl.createDiv({ cls: "task-overflow-btn" });
-        overflowBtn.setText(`\u8fd8\u6709 ${hiddenCount} \u4e2a`);
-        overflowBtn.addEventListener("click", (e) => {
-          e.stopPropagation();
-          showTaskPopup(dayEl, day.dateStr, dayTasks, view);
-        });
       }
     }
   }
@@ -665,73 +636,6 @@ async function createTaskForDate(app: App, view: TaskCalendarView, dateStr: stri
 
   await view.loadTasks();
   view.render();
-}
-
-// ═══════════════════════════════════════════════════════════
-//  Task Popup
-// ═══════════════════════════════════════════════════════════
-
-function showTaskPopup(
-  anchorEl: HTMLElement,
-  dateStr: string,
-  tasks: Task[],
-  view: TaskCalendarView
-) {
-  document.querySelectorAll(".task-day-popup").forEach((el) => el.remove());
-
-  const popup = document.body.createDiv({ cls: "task-day-popup" });
-
-  const rect = anchorEl.getBoundingClientRect();
-  let left = rect.right + 4;
-  let top = rect.top;
-  const popupWidth = 260;
-  const popupHeight = Math.min(400, tasks.length * 44 + 60);
-
-  if (left + popupWidth > window.innerWidth - 16) left = rect.left - popupWidth - 4;
-  if (top + popupHeight > window.innerHeight - 16) top = window.innerHeight - popupHeight - 16;
-  if (top < 16) top = 16;
-
-  popup.style.left = `${left}px`;
-  popup.style.top = `${top}px`;
-
-  const header = popup.createDiv({ cls: "task-popup-header" });
-  header.setText(`${dateStr} \u2014 ${tasks.length} \u4e2a\u4efb\u52a1`);
-
-  const list = popup.createDiv({ cls: "task-popup-list" });
-  for (const task of tasks) {
-    const item = list.createDiv({ cls: "task-popup-item" });
-
-    const status = item.createDiv({ cls: "task-popup-status" });
-    status.setText(task.completed ? "\u2611" : "\u2610");
-    if (task.completed) status.addClass("completed");
-
-    const info = item.createDiv({ cls: "task-popup-info" });
-    info.createDiv({ cls: "task-popup-desc", text: task.description });
-
-    const meta = info.createDiv({ cls: "task-popup-meta" });
-    if (task.priority !== "none") {
-      meta.createSpan({ cls: `task-popup-priority task-priority-${task.priority}`, text: getPriorityEmoji(task.priority) });
-    }
-    for (const tag of task.tags.slice(0, 3)) {
-      meta.createSpan({ cls: "task-popup-tag", text: `#${tag}` });
-    }
-    if (isMultiDayTask(task)) {
-      meta.createSpan({ cls: "task-popup-range", text: `${task.startDate}\u2192${task.dueDate}` });
-    }
-
-    item.addEventListener("click", () => {
-      view.openTaskFile(task);
-      popup.remove();
-    });
-  }
-
-  const closeHandler = (e: MouseEvent) => {
-    if (!popup.contains(e.target as Node)) {
-      popup.remove();
-      document.removeEventListener("click", closeHandler);
-    }
-  };
-  setTimeout(() => document.addEventListener("click", closeHandler), 0);
 }
 
 // ═══════════════════════════════════════════════════════════

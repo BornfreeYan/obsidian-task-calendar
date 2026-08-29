@@ -225,7 +225,6 @@ var init_settings = __esm({
     DEFAULT_SETTINGS = {
       colorRules: [],
       filterRules: [],
-      projects: [],
       queryPaths: [
         { id: "default", path: "", enabled: true }
       ]
@@ -859,7 +858,7 @@ function renderMonthView(container, view) {
           break;
         }
       }
-      if (!placed && incLanes.length < 4) {
+      if (!placed) {
         incLanes.push([task]);
       }
     }
@@ -872,7 +871,7 @@ function renderMonthView(container, view) {
           break;
         }
       }
-      if (!placed && compLanes.length < 4) {
+      if (!placed) {
         compLanes.push([task]);
       }
     }
@@ -932,41 +931,20 @@ function renderMonthView(container, view) {
       const dayEl = weekRow.createDiv({
         cls: `calendar-day-cell${day.isOtherMonth ? " other-month" : ""}${day.isToday ? " today" : ""}`
       });
-      const dayTasks = filteredTasks.filter((t) => {
+      const singleDayTasks = filteredTasks.filter((t) => {
         if (!t.startDate)
           return false;
-        const end = t.dueDate || t.startDate;
-        return day.dateStr >= t.startDate && day.dateStr <= end;
+        if (isMultiDayTask(t))
+          return false;
+        return day.dateStr === t.startDate;
       });
-      const multiBarCount = lanes.filter(
-        (lane) => lane.some((t) => {
-          const end = t.dueDate || t.startDate;
-          return day.dateStr >= t.startDate && day.dateStr <= end;
-        })
-      ).length;
-      const maxVisible = 5;
-      const availableSlots = Math.max(0, maxVisible - multiBarCount);
-      const overflowMulti = dayTasks.filter(
-        (t) => isMultiDayTask(t) && !lanes.some((lane) => lane.includes(t))
-      );
-      const singleDayTasks = dayTasks.filter((t) => !isMultiDayTask(t));
-      const allCards = [...overflowMulti, ...singleDayTasks];
+      const allCards = [...singleDayTasks];
       allCards.sort((a, b) => (a.completed ? 1 : 0) - (b.completed ? 1 : 0));
-      const visibleCards = allCards.slice(0, availableSlots);
-      const hiddenCount = allCards.length - availableSlots;
       const tasksContainer = dayEl.createDiv({ cls: "calendar-notes" });
-      for (const task of visibleCards) {
+      for (const task of allCards) {
         tasksContainer.appendChild(
           createTaskCard(task, view, "month", weekRow)
         );
-      }
-      if (hiddenCount > 0) {
-        const overflowBtn = dayEl.createDiv({ cls: "task-overflow-btn" });
-        overflowBtn.setText(`\u8FD8\u6709 ${hiddenCount} \u4E2A`);
-        overflowBtn.addEventListener("click", (e) => {
-          e.stopPropagation();
-          showTaskPopup(dayEl, day.dateStr, dayTasks, view);
-        });
       }
     }
   }
@@ -1179,56 +1157,6 @@ async function createTaskForDate(app, view, dateStr, description) {
   await view.loadTasks();
   view.render();
 }
-function showTaskPopup(anchorEl, dateStr, tasks, view) {
-  document.querySelectorAll(".task-day-popup").forEach((el) => el.remove());
-  const popup = document.body.createDiv({ cls: "task-day-popup" });
-  const rect = anchorEl.getBoundingClientRect();
-  let left = rect.right + 4;
-  let top = rect.top;
-  const popupWidth = 260;
-  const popupHeight = Math.min(400, tasks.length * 44 + 60);
-  if (left + popupWidth > window.innerWidth - 16)
-    left = rect.left - popupWidth - 4;
-  if (top + popupHeight > window.innerHeight - 16)
-    top = window.innerHeight - popupHeight - 16;
-  if (top < 16)
-    top = 16;
-  popup.style.left = `${left}px`;
-  popup.style.top = `${top}px`;
-  const header = popup.createDiv({ cls: "task-popup-header" });
-  header.setText(`${dateStr} \u2014 ${tasks.length} \u4E2A\u4EFB\u52A1`);
-  const list = popup.createDiv({ cls: "task-popup-list" });
-  for (const task of tasks) {
-    const item = list.createDiv({ cls: "task-popup-item" });
-    const status = item.createDiv({ cls: "task-popup-status" });
-    status.setText(task.completed ? "\u2611" : "\u2610");
-    if (task.completed)
-      status.addClass("completed");
-    const info = item.createDiv({ cls: "task-popup-info" });
-    info.createDiv({ cls: "task-popup-desc", text: task.description });
-    const meta = info.createDiv({ cls: "task-popup-meta" });
-    if (task.priority !== "none") {
-      meta.createSpan({ cls: `task-popup-priority task-priority-${task.priority}`, text: getPriorityEmoji(task.priority) });
-    }
-    for (const tag of task.tags.slice(0, 3)) {
-      meta.createSpan({ cls: "task-popup-tag", text: `#${tag}` });
-    }
-    if (isMultiDayTask(task)) {
-      meta.createSpan({ cls: "task-popup-range", text: `${task.startDate}\u2192${task.dueDate}` });
-    }
-    item.addEventListener("click", () => {
-      view.openTaskFile(task);
-      popup.remove();
-    });
-  }
-  const closeHandler = (e) => {
-    if (!popup.contains(e.target)) {
-      popup.remove();
-      document.removeEventListener("click", closeHandler);
-    }
-  };
-  setTimeout(() => document.addEventListener("click", closeHandler), 0);
-}
 function isTaskFiltered(view, task) {
   const filters = view.plugin.settings.filterRules.filter(
     (r) => r.enabled && r.keyword.trim()
@@ -1306,7 +1234,6 @@ var TaskCalendarView = class extends import_obsidian6.ItemView {
   constructor(leaf, plugin) {
     super(leaf);
     this._renderTimeout = null;
-    this._projectScroll = null;
     this._allTasks = [];
     this.plugin = plugin;
     this.currentDate = new Date();
@@ -1478,44 +1405,6 @@ var TaskCalendarView = class extends import_obsidian6.ItemView {
       return dateStr >= t.startDate && dateStr <= end;
     });
   }
-  // ── Project data ───────────────────────────────────────
-  getProjectsData() {
-    const projects = this.plugin.settings.projects.filter((p) => p.enabled);
-    const filteredTasks = this._allTasks.filter((t) => !this.isTaskFiltered(t));
-    return projects.map((p) => {
-      let tasks = [];
-      if (p.filterType === "path") {
-        const prefix = p.filterValue ? p.filterValue + "/" : "";
-        tasks = filteredTasks.filter((t) => t.filePath.startsWith(prefix));
-      } else if (p.filterType === "tag") {
-        tasks = filteredTasks.filter(
-          (t) => t.tags.some(
-            (tag) => tag.toLowerCase() === p.filterValue.toLowerCase()
-          )
-        );
-      }
-      const total = tasks.length;
-      const hit = tasks.filter((t) => t.completed).length;
-      const progress = total > 0 ? Math.round(hit / total * 100) : 0;
-      const tasksByDate = /* @__PURE__ */ new Map();
-      for (const t of tasks) {
-        if (!t.startDate)
-          continue;
-        const start = t.startDate;
-        const end = t.dueDate || start;
-        const d = new Date(start);
-        const endD = new Date(end);
-        while (d <= endD) {
-          const ds = formatDateStr3(d);
-          if (!tasksByDate.has(ds))
-            tasksByDate.set(ds, []);
-          tasksByDate.get(ds).push(t);
-          d.setDate(d.getDate() + 1);
-        }
-      }
-      return { project: p, total, hit, progress, tasksByDate, tasks };
-    });
-  }
   // ── Date update ────────────────────────────────────────
   async updateTaskDate(task, newStartDate, newDueDate) {
     await updateTaskDates(this.app, task, newStartDate, newDueDate);
@@ -1544,12 +1433,6 @@ var TaskCalendarView = class extends import_obsidian6.ItemView {
     }
   }
 };
-function formatDateStr3(d) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
 
 // main.ts
 init_settings();

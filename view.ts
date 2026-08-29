@@ -10,7 +10,6 @@ export class TaskCalendarView extends ItemView {
   currentDate: Date;
   viewMode: ViewMode;
   private _renderTimeout: number | null = null;
-  _projectScroll: { left: number; top: number } | null = null;
   private _allTasks: Task[] = [];
 
   constructor(leaf: WorkspaceLeaf, plugin: TaskCalendarPlugin) {
@@ -214,49 +213,6 @@ export class TaskCalendarView extends ItemView {
     });
   }
 
-  // ── Project data ───────────────────────────────────────
-
-  getProjectsData(): ProjectTimelineData[] {
-    const projects = this.plugin.settings.projects.filter((p) => p.enabled);
-    const filteredTasks = this._allTasks.filter((t) => !this.isTaskFiltered(t));
-
-    return projects.map((p) => {
-      let tasks: Task[] = [];
-      if (p.filterType === "path") {
-        const prefix = p.filterValue ? p.filterValue + "/" : "";
-        tasks = filteredTasks.filter((t) => t.filePath.startsWith(prefix));
-      } else if (p.filterType === "tag") {
-        tasks = filteredTasks.filter((t) =>
-          t.tags.some(
-            (tag) => tag.toLowerCase() === p.filterValue.toLowerCase()
-          )
-        );
-      }
-
-      const total = tasks.length;
-      const hit = tasks.filter((t) => t.completed).length;
-      const progress = total > 0 ? Math.round((hit / total) * 100) : 0;
-
-      // Group tasks by date (each task appears on every day of its range)
-      const tasksByDate = new Map<string, Task[]>();
-      for (const t of tasks) {
-        if (!t.startDate) continue;
-        const start = t.startDate;
-        const end = t.dueDate || start;
-        const d = new Date(start);
-        const endD = new Date(end);
-        while (d <= endD) {
-          const ds = formatDateStr(d);
-          if (!tasksByDate.has(ds)) tasksByDate.set(ds, []);
-          tasksByDate.get(ds)!.push(t);
-          d.setDate(d.getDate() + 1);
-        }
-      }
-
-      return { project: p, total, hit, progress, tasksByDate, tasks };
-    });
-  }
-
   // ── Date update ────────────────────────────────────────
 
   async updateTaskDate(task: Task, newStartDate: string, newDueDate: string) {
@@ -290,22 +246,4 @@ export class TaskCalendarView extends ItemView {
       }
     }
   }
-}
-
-// ── Types exported for projectTimeline ───────────────────
-
-export interface ProjectTimelineData {
-  project: import("./settings").Project;
-  total: number;
-  hit: number;
-  progress: number;
-  tasksByDate: Map<string, Task[]>;
-  tasks: Task[];
-}
-
-function formatDateStr(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
 }

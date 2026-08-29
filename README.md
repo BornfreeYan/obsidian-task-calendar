@@ -9,7 +9,7 @@
 ### 安装
 
 1. 从 [Releases](https://github.com/BornfreeYan/obsidian-task-calendar/releases) 下载 `main.js`、`manifest.json`、`styles.css`
-2. 放入 Obsidian vault 的 `.obsidian/plugins/task-calendar/` 目录
+2. 放入 Obsidian vault 的 `.obsidian/plugins/obsidian-task-calendar/` 目录
 3. 重启 Obsidian，在设置 → 社区插件中启用 **Task Calendar**
 
 ### 使用
@@ -130,19 +130,6 @@ npm install        # 安装依赖
 npm run build      # 类型检查 + esbuild 生产构建
 npm run dev        # 开发模式（文件变更自动构建）
 ```
-
----
-
-## 从 Note Timeline 迁移
-
-本插件由 [Note Timeline](https://github.com/BornfreeYan/obsidian-note-timeline) 彻底重构而来：
-
-- 数据单元从**文件**改为**任务**
-- 日期来源从 Front Matter 改为 Obsidian Task 语法（`🛫` / `📅`）
-- 移除了项目视图和三日视图，聚焦日历
-- 增加了多日任务跨天长条和 resize 交互
-
-旧用户如需保留笔记日历功能，可以继续使用 [obsidian-note-timeline](https://github.com/BornfreeYan/obsidian-note-timeline)（已归档）。
 
 ---
 
